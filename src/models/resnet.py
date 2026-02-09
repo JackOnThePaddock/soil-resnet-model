@@ -45,7 +45,7 @@ class NationalSoilNet(nn.Module):
     Architecture:
         Input(64) -> Linear(128) -> BN -> SiLU -> [ResBlocks x2] -> 7 output heads
 
-    Each output head: Linear(128->64) -> SiLU -> Linear(64->1)
+    Each output head: Linear(hidden->hidden//2) -> SiLU -> Linear(hidden//2->1)
     """
 
     def __init__(

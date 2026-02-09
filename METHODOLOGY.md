@@ -49,7 +49,7 @@ Not all targets are available for every sample. Missing values are handled at tr
 
 ### Automated Extraction
 
-Data extraction was automated using the TERN Soil Data API. The pipeline queries sample locations within bounding boxes, filters by depth and date, harmonises measurement methods where needed, and exports a consolidated Parquet file with coordinates, target values, and metadata.
+Data extraction was automated using the TERN Soil Data API. The pipeline queries sample locations within bounding boxes, filters by depth and date, harmonises measurement methods where needed, and exports a consolidated CSV file with coordinates, target values, and metadata.
 
 ---
 
@@ -102,7 +102,7 @@ ResidualBlock_1(128)
 ResidualBlock_2(128)
     |
     v
-7 parallel output heads: Linear(128 -> 1) each
+7 parallel output heads: Linear(128 -> 64) -> SiLU -> Linear(64 -> 1) each
     |
     v
 Output: [pH, CEC, ESP, SOC, Ca, Mg, Na]
@@ -138,17 +138,12 @@ The skip connection allows gradients to flow directly through the block, enablin
 
 ### Output Heads
 
-Seven independent linear heads project the shared 128-dimensional representation to scalar predictions:
+Seven independent two-layer heads project the shared 128-dimensional representation to scalar predictions:
 
-- `head_ph`: Linear(128 -> 1)
-- `head_cec`: Linear(128 -> 1)
-- `head_esp`: Linear(128 -> 1)
-- `head_soc`: Linear(128 -> 1)
-- `head_ca`: Linear(128 -> 1)
-- `head_mg`: Linear(128 -> 1)
-- `head_na`: Linear(128 -> 1)
+- Each head: `Linear(128 -> 64) -> SiLU -> Linear(64 -> 1)`
+- Targets: pH, CEC, ESP, SOC, Ca, Mg, Na
 
-This multi-target design enables the shared backbone to learn correlations between soil properties (for example, the relationship between CEC, Ca, Mg, and Na) while keeping predictions independent at the output layer.
+The intermediate 64-dimensional layer within each head allows non-linear target-specific transformations beyond what a single linear projection could capture. This multi-target design enables the shared backbone to learn correlations between soil properties (for example, the relationship between CEC, Ca, Mg, and Na) while the per-target heads specialise for each output.
 
 ### Design Rationale
 
@@ -374,17 +369,19 @@ The primary application is generating continuous soil property maps across farm 
 
 ### Lime Rate Calculation
 
-Predicted pH, CEC, and Ca values feed into agronomic lime requirement models:
+Predicted pH and CEC values are used to compute spatially variable lime requirements:
 
-- The Shoemaker-McLean-Pratt (SMP) buffer method or equivalent is applied using predicted soil chemistry.
-- Lime rates (tonnes/ha of calcium carbonate equivalent) are computed spatially, enabling variable-rate lime application maps.
+- pH buffering capacity is estimated as `pHBC = 0.13 * CEC`.
+- Lime rate (t/ha) is computed as `rate = (pH_deficit * pHBC) / (NV * EF)`, where `pH_deficit = target_pH - predicted_pH`, `NV` is the neutralising value of the lime product (default 0.95), and `EF` is the application efficiency factor (default 0.80).
+- Rates below 0.5 t/ha are zeroed (cost-ineffective to apply), and rates are capped at 4.0 t/ha per application.
+- Spatial lime rate maps enable variable-rate application across the farm.
 
 ### Gypsum Rate Calculation
 
-For sodic soils, predicted ESP, CEC, Ca, and Na values are used to calculate gypsum (calcium sulfate) requirements:
+For sodic soils, predicted ESP and CEC values are used to calculate gypsum (calcium sulfate) requirements:
 
-- The target ESP reduction is specified (e.g., from current ESP to below 6%).
-- Gypsum rate is computed as a function of CEC, current ESP, target ESP, and soil bulk density.
+- Gypsum rate (t/ha) is computed as `rate = (ESP - target_ESP) * CEC * 0.06`, where `target_ESP` is the remediation target (default 6%).
+- Only applied where predicted ESP exceeds the target; negative rates are zeroed.
 - Spatial gypsum maps enable targeted amelioration of sodic areas.
 
 ### Conditioned Latin Hypercube Sampling (cLHS)

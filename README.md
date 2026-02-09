@@ -37,7 +37,7 @@ v     v     v     v     v     v     v     v
 pH   CEC   ESP   SOC   Ca    Mg    Na
 (1)  (1)   (1)   (1)   (1)   (1)   (1)
 
-Each output head: Linear(128 -> 1)
+Each output head: Linear(128 -> 64) -> SiLU -> Linear(64 -> 1)
 ```
 
 Each `ResidualBlock` consists of two linear layers with batch normalisation, SiLU activation, and dropout, wrapped with a skip (identity) connection. The multi-target design allows the network to learn shared representations across correlated soil properties while maintaining independent prediction heads.
@@ -181,7 +181,7 @@ soil-resnet-model/
 |   |   |-- resnet.py                 NationalSoilNet + ResidualBlock
 |   |   |-- dataset.py                SoilDataset (PyTorch Dataset)
 |   |   |-- ensemble.py               SoilEnsemble loader + predict
-|   |   |-- baselines/                SVR, RF, Cubist, GPR
+|   |   |-- baselines/                (placeholder; training in src/training/)
 |   |-- training/
 |   |   |-- train_resnet.py           Ensemble training loop
 |   |   |-- train_baselines.py        Baseline training
@@ -210,7 +210,6 @@ soil-resnet-model/
 |       |-- lime_rates.py             Lime application rates
 |       |-- gypsum_rates.py           Gypsum application rates
 |       |-- clhs_sampling.py          cLHS sampling design
-|       |-- pedotransfer.py           Saxton & Rawls functions
 |
 |-- scripts/                          CLI entry points
 |-- data/raw/                         Raw soil data + SQLite DB

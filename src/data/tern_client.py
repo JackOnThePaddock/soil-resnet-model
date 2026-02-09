@@ -41,7 +41,7 @@ class TERNAPIClient:
             data = response.json()
             if isinstance(data, list) and len(data) == 1:
                 first_item = str(data[0])
-                if "superceded" in first_item.lower() or "ansis" in first_item.lower():
+                if "superseded" in first_item.lower() or "ansis" in first_item.lower():
                     print("WARNING: TERN API has been deprecated.")
                     return False
             return True

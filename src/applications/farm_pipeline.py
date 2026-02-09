@@ -1,22 +1,12 @@
 """End-to-end farm prediction pipeline."""
 
-import argparse
-import re
-import sys
 from pathlib import Path
-from typing import List, Optional
-
-import numpy as np
+from typing import Optional
 
 from src.models.ensemble import SoilEnsemble
 from src.inference.predict_raster import predict_raster
 from src.inference.mosaic import create_mosaics, print_summary
-
-
-def safe_name(name: str) -> str:
-    name = name.strip()
-    name = re.sub(r"[^A-Za-z0-9_-]+", "_", name)
-    return name[:64] if name else "paddock"
+from src.features.gee_sampler import safe_name
 
 
 def load_paddocks(shp_path: str) -> list:

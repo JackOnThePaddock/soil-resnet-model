@@ -6,5 +6,5 @@ Trained baseline models are stored here after running:
 python scripts/train_baselines.py --data data/processed/features.csv --output models/baselines/
 ```
 
-Baseline models include SVR, Random Forest, Extra Trees, Cubist, and GPR.
-These are not tracked in git due to size. Only the ResNet ensemble weights are included.
+Baseline models (SVR, Random Forest, Extra Trees) are trained via `src/training/train_baselines.py`.
+Trained baseline model files are not tracked in git. Only the ResNet ensemble weights are included.
