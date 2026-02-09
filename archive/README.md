@@ -12,14 +12,14 @@ Original scripts preserved for reference. These are the source scripts that were
 - `sodic_classifier_colab.ipynb` - Sodic soil classifier notebook
 
 ### classical_ml/
-- `svr_alphaearth_top10cm.py` - SVR with RBF kernel
-- `alphaearth_models_top10cm.py` - Multi-model comparison
-- `ph_model_search.py` - pH model search with RFE
-- `cubist_model_search_with400.py` - Cubist model search
 - `gpr_pipeline.py` - Gaussian Process Regression
 
+Note: The following scripts were not available for archiving (source directory not found on this machine):
+`svr_alphaearth_top10cm.py`, `alphaearth_models_top10cm.py`, `ph_model_search.py`, `cubist_model_search_with400.py`
+
 ### calibration/
-- `national_local_calibration_calib_catboost.py` - CatBoost calibration
+
+Note: `national_local_calibration_calib_catboost.py` was not available for archiving (source directory not found on this machine).
 
 ### farm_applications/
 - `lime_rate_ph55.py` - Lime rate calculation

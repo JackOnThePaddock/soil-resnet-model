@@ -22,7 +22,7 @@
 
 This project uses AlphaEarth foundation model embeddings from Google Earth Engine.
 
-- Image Collection: `projects/project-name/assets/alphaearth`
+- Image Collection: `projects/sat-io/open-datasets/STAC/alphaearth-embeddings-sentinel2`
 - Bands: 64 embedding dimensions
 - Temporal composites: 5-year median (2019-2024)
 - Spatial resolution: 10m (Sentinel-2 native)

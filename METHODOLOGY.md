@@ -341,19 +341,19 @@ Three metrics are reported for each target:
 
 ### Per-Target Evaluation
 
-Because data availability varies across targets (e.g., 527 test samples for CEC but only 123 for Ca), metrics are computed independently for each target on its available test samples.
+Because data availability varies across targets (e.g., 698 test samples for pH but only 100 for ESP), metrics are computed independently for each target on its available test samples.
 
 ### Holdout Results
 
-| Target | N Test | R-squared | RMSE   | MAE   |
-|--------|--------|-----------|--------|-------|
-| pH     | 133    | 0.809     | 0.638  | 0.421 |
-| CEC    | 527    | 0.959     | 3.948  | 2.101 |
-| ESP    | 524    | 0.841     | 10.327 | 3.994 |
-| SOC    | 527    | 0.870     | 0.557  | 0.320 |
-| Ca     | 123    | 0.929     | 4.905  | 2.685 |
-| Mg     | 123    | 0.926     | 3.587  | 1.966 |
-| Na     | 123    | 0.805     | 2.267  | 1.134 |
+| Target | N Test | R-squared | RMSE (raw) | MAE (raw) |
+|--------|--------|-----------|------------|-----------|
+| pH     | 698    | 0.809     | 0.446      | 0.343     |
+| CEC    | 130    | 0.959     | 3.434      | 2.607     |
+| ESP    | 100    | 0.841     | 1.609      | 0.901     |
+| SOC    | 150    | 0.870     | 1.524      | 0.739     |
+| Ca     | 338    | 0.929     | 2.603      | 1.900     |
+| Mg     | 327    | 0.926     | 1.187      | 0.814     |
+| Na     | 234    | 0.805     | 0.239      | 0.115     |
 
 ### Paddock-Holdout Cross-Validation
 

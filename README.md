@@ -48,15 +48,15 @@ Each `ResidualBlock` consists of two linear layers with batch normalisation, SiL
 
 Holdout test set performance for each soil property target:
 
-| Target | N Test | R-squared | RMSE   | MAE   |
-|--------|--------|-----------|--------|-------|
-| pH     | 133    | 0.809     | 0.638  | 0.421 |
-| CEC    | 527    | 0.959     | 3.948  | 2.101 |
-| ESP    | 524    | 0.841     | 10.327 | 3.994 |
-| SOC    | 527    | 0.870     | 0.557  | 0.320 |
-| Ca     | 123    | 0.929     | 4.905  | 2.685 |
-| Mg     | 123    | 0.926     | 3.587  | 1.966 |
-| Na     | 123    | 0.805     | 2.267  | 1.134 |
+| Target | N Test | R-squared | RMSE (raw) | MAE (raw) |
+|--------|--------|-----------|------------|-----------|
+| pH     | 698    | 0.809     | 0.446      | 0.343     |
+| CEC    | 130    | 0.959     | 3.434      | 2.607     |
+| ESP    | 100    | 0.841     | 1.609      | 0.901     |
+| SOC    | 150    | 0.870     | 1.524      | 0.739     |
+| Ca     | 338    | 0.929     | 2.603      | 1.900     |
+| Mg     | 327    | 0.926     | 1.187      | 0.814     |
+| Na     | 234    | 0.805     | 0.239      | 0.115     |
 
 All metrics are computed on a stratified holdout set that was excluded from training and cross-validation. The varying test set sizes reflect per-target data availability, as the model uses masked loss to handle missing values.
 
@@ -69,14 +69,16 @@ All metrics are computed on a stratified holdout set that was excluded from trai
 Clone the repository and install in editable mode:
 
 ```bash
-git clone https://github.com/your-org/soil-resnet-model.git
+git clone https://github.com/jackcoombs/soil-resnet-model.git
 cd soil-resnet-model
 pip install -e .
 ```
 
-### Dependencies
+For all optional dependencies (baselines, GEE, notebooks, dev tools):
 
-Core dependencies include PyTorch, scikit-learn, pandas, NumPy, and CatBoost. See `pyproject.toml` or `requirements.txt` for the full list.
+```bash
+pip install -e ".[all]"
+```
 
 ---
 
@@ -86,51 +88,44 @@ Core dependencies include PyTorch, scikit-learn, pandas, NumPy, and CatBoost. Se
 
 Train a full ensemble (5 models, 5-fold CV each):
 
+```bash
+python scripts/train_resnet_ensemble.py \
+    --data data/processed/features.csv \
+    --config configs/resnet.yaml \
+    --output models/resnet_ensemble
+```
+
+Or from Python:
+
 ```python
-from soil_resnet.train import train_ensemble
+from src.training.train_resnet import train_ensemble
 
 train_ensemble(
-    data_path="data/processed/soil_samples.parquet",
-    output_dir="models/ensemble",
-    n_models=5,
-    n_folds=5,
-    max_epochs=1000,
-    lr=1e-4,
-    weight_decay=1e-5,
-    patience=50,
+    data_path="data/processed/features.csv",
+    output_dir="models/resnet_ensemble",
+    n_models=5, n_splits=5, epochs=1000, lr=1e-4,
 )
 ```
 
 ### Evaluation
 
-Evaluate the ensemble on a holdout set:
+Evaluate and compare models:
 
-```python
-from soil_resnet.evaluate import evaluate_ensemble
-
-metrics = evaluate_ensemble(
-    model_dir="models/ensemble",
-    test_data="data/processed/test_set.parquet",
-)
-
-for target, m in metrics.items():
-    print(f"{target}: R2={m['r2']:.3f}, RMSE={m['rmse']:.3f}, MAE={m['mae']:.3f}")
+```bash
+python scripts/evaluate_models.py --metrics-dir results/metrics/
 ```
 
 ### Prediction
 
-Generate predictions (with uncertainty) for new satellite embeddings:
+Generate predictions with uncertainty for new satellite embeddings:
 
 ```python
-from soil_resnet.predict import predict
+from src.models.ensemble import SoilEnsemble
 
-results = predict(
-    model_dir="models/ensemble",
-    embeddings="data/new_site_embeddings.parquet",
-)
-
-# results is a DataFrame with columns: pH_mean, pH_std, CEC_mean, CEC_std, ...
-print(results.head())
+ensemble = SoilEnsemble("models/resnet_ensemble")
+predictions, uncertainty = ensemble.predict(features, return_std=True)
+# predictions shape: (N, 7) -- one column per target
+# uncertainty shape: (N, 7) -- ensemble standard deviation
 ```
 
 ### National-to-Local Calibration
@@ -138,13 +133,24 @@ print(results.head())
 Fine-tune predictions for a specific farm using local calibration samples:
 
 ```python
-from soil_resnet.calibrate import calibrate_to_local
+from src.training.calibration import calibrate_national_to_local
 
-calibrated = calibrate_to_local(
-    national_model_dir="models/ensemble",
-    local_data="data/farm/local_samples.parquet",
-    embeddings="data/farm/paddock_embeddings.parquet",
+calibrate_national_to_local(
+    national_data="data/processed/features.csv",
+    local_data="data/farm/local_samples.csv",
+    output_dir="models/calibrated",
 )
+```
+
+### Farm Pipeline
+
+Run end-to-end predictions for a farm:
+
+```bash
+python scripts/predict_farm.py \
+    --shp data/paddocks.shp \
+    --models models/resnet_ensemble \
+    --output results/farm_predictions
 ```
 
 ---
@@ -161,35 +167,59 @@ calibrated = calibrate_to_local(
 
 ```
 soil-resnet-model/
-|-- README.md                  Project overview and quick start
-|-- METHODOLOGY.md             Detailed methodology documentation
-|-- pyproject.toml             Package configuration and dependencies
-|-- requirements.txt           Pinned dependency versions
+|-- README.md                         Project overview and quick start
+|-- METHODOLOGY.md                    Detailed methodology documentation
+|-- RESULTS.md                        Model performance metrics
+|-- pyproject.toml                    Package configuration and dependencies
+|-- Makefile                          Common commands
+|-- configs/
+|   |-- resnet.yaml                   ResNet hyperparameters
+|   |-- baselines.yaml                Baseline model configs
 |
-|-- soil_resnet/
-|   |-- __init__.py
-|   |-- model.py               NationalSoilNet architecture definition
-|   |-- train.py               Ensemble training with k-fold CV
-|   |-- evaluate.py            Holdout evaluation and metrics
-|   |-- predict.py             Inference with ensemble uncertainty
-|   |-- calibrate.py           National-to-local CatBoost calibration
-|   |-- dataset.py             Data loading and preprocessing
-|   |-- utils.py               Shared utilities and constants
+|-- src/
+|   |-- models/
+|   |   |-- resnet.py                 NationalSoilNet + ResidualBlock
+|   |   |-- dataset.py                SoilDataset (PyTorch Dataset)
+|   |   |-- ensemble.py               SoilEnsemble loader + predict
+|   |   |-- baselines/                SVR, RF, Cubist, GPR
+|   |-- training/
+|   |   |-- train_resnet.py           Ensemble training loop
+|   |   |-- train_baselines.py        Baseline training
+|   |   |-- losses.py                 Masked MSE loss
+|   |   |-- calibration.py            National-to-local CatBoost
+|   |-- inference/
+|   |   |-- predict_points.py         CSV point predictions
+|   |   |-- predict_raster.py         GeoTIFF raster predictions
+|   |   |-- mosaic.py                 Farm mosaic creation
+|   |-- evaluation/
+|   |   |-- metrics.py                R², RMSE, MAE
+|   |   |-- cross_validation.py       K-fold, paddock-holdout CV
+|   |   |-- model_comparison.py       Side-by-side comparison
+|   |-- features/
+|   |   |-- gee_sampler.py            GEE AlphaEarth sampling
+|   |   |-- ndvi_mask.py              Vegetation masking
+|   |   |-- feature_selection.py      RFE + RF importance
+|   |-- data/
+|   |   |-- tern_client.py            TERN API client
+|   |   |-- ansis_parser.py           ANSIS JSON-LD parser
+|   |   |-- data_cleaner.py           Cleaning + validation
+|   |   |-- db_handler.py             SQLite handler
+|   |   |-- extract_pipeline.py       Data extraction orchestrator
+|   |-- applications/
+|       |-- farm_pipeline.py          End-to-end farm predictions
+|       |-- lime_rates.py             Lime application rates
+|       |-- gypsum_rates.py           Gypsum application rates
+|       |-- clhs_sampling.py          cLHS sampling design
+|       |-- pedotransfer.py           Saxton & Rawls functions
 |
-|-- data/
-|   |-- raw/                   Raw ANSIS exports and GEE extractions
-|   |-- processed/             Cleaned and merged datasets
-|
-|-- models/
-|   |-- ensemble/              Trained model checkpoints and scalers
-|
-|-- notebooks/
-|   |-- exploration.ipynb      Data exploration and visualisation
-|   |-- baselines.ipynb        Baseline model comparisons
-|
-|-- tests/
-|   |-- test_model.py          Model unit tests
-|   |-- test_dataset.py        Data pipeline tests
+|-- scripts/                          CLI entry points
+|-- data/raw/                         Raw soil data + SQLite DB
+|-- models/resnet_ensemble/           Trained weights + scaler
+|-- results/metrics/                  Holdout evaluation CSVs
+|-- notebooks/                        EDA and analysis notebooks
+|-- tests/                            Unit tests
+|-- gee/                              GEE setup and sampling
+|-- archive/                          Original scripts for reference
 ```
 
 ---
