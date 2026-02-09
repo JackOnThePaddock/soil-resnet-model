@@ -1,0 +1,40 @@
+# NationalSoilNet ResNet Ensemble Configuration
+
+model:
+  input_dim: 64          # AlphaEarth satellite embedding bands
+  hidden_dim: 128        # Hidden layer dimension
+  num_blocks: 2          # Number of residual blocks
+  dropout: 0.3           # Dropout rate
+  activation: silu       # Activation function (SiLU/Swish)
+
+targets:
+  - pH
+  - CEC
+  - ESP
+  - SOC
+  - Ca
+  - Mg
+  - Na
+
+training:
+  ensemble_size: 5       # Number of models in ensemble
+  n_splits: 5            # K-fold cross-validation splits
+  epochs: 1000           # Maximum training epochs
+  batch_size: 64         # Training batch size
+  learning_rate: 0.0001  # AdamW learning rate
+  weight_decay: 0.01     # AdamW weight decay
+  patience: 50           # Early stopping patience
+  grad_clip: 1.0         # Gradient clipping max norm
+  val_fraction: 0.2      # Validation split fraction
+  random_seed: 42        # Base random seed
+
+data:
+  depth_filter: "0-15cm" # Soil depth range
+  min_year: 2017         # Minimum observation year
+  feature_prefix: "AE_"  # AlphaEarth band column prefix
+  n_features: 64         # Number of input features
+
+output:
+  model_dir: "models/resnet_ensemble"
+  metrics_dir: "results/metrics"
+  scaler_file: "scaler.pkl"
