@@ -51,7 +51,11 @@ def masked_weighted_huber_loss(
     if mask.sum() == 0:
         return torch.tensor(0.0, device=predictions.device)
 
-    error = predictions - targets
+    # Compute loss only on observed targets to avoid NaN gradients from masked entries.
+    pred_valid = predictions[mask]
+    target_valid = targets[mask]
+
+    error = pred_valid - target_valid
     abs_error = torch.abs(error)
     huber = torch.where(
         abs_error <= delta,
@@ -59,7 +63,7 @@ def masked_weighted_huber_loss(
         delta * (abs_error - 0.5 * delta),
     )
 
-    weight_matrix = torch.ones_like(huber)
+    weight_matrix = torch.ones_like(predictions)
     if target_weights is not None:
         target_weights = target_weights.to(predictions.device, dtype=predictions.dtype)
         weight_matrix = weight_matrix * target_weights.view(1, -1)
@@ -67,11 +71,11 @@ def masked_weighted_huber_loss(
         sample_weights = sample_weights.to(predictions.device, dtype=predictions.dtype)
         weight_matrix = weight_matrix * sample_weights.view(-1, 1)
 
-    weighted_loss = huber * weight_matrix
     valid_weights = weight_matrix[mask]
     if valid_weights.sum() <= 0:
         return torch.tensor(0.0, device=predictions.device)
-    return weighted_loss[mask].sum() / valid_weights.sum()
+    weighted_loss = huber * valid_weights
+    return weighted_loss.sum() / valid_weights.sum()
 
 
 def esp_consistency_penalty(

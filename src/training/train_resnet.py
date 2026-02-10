@@ -220,6 +220,36 @@ def _unpack_batch(
     return features, targets, None
 
 
+def _find_nonfinite_model_entries(model: nn.Module, max_items: int = 5) -> List[str]:
+    """Return names of non-finite parameters/buffers, capped to max_items."""
+    bad: List[str] = []
+
+    for name, tensor in model.named_parameters():
+        if torch.is_tensor(tensor) and not torch.isfinite(tensor).all():
+            bad.append(name)
+            if len(bad) >= max_items:
+                return bad
+
+    for name, tensor in model.named_buffers():
+        if torch.is_tensor(tensor) and not torch.isfinite(tensor).all():
+            bad.append(name)
+            if len(bad) >= max_items:
+                return bad
+
+    return bad
+
+
+def _gradients_are_finite(model: nn.Module) -> bool:
+    """Check that all present gradients are finite."""
+    for param in model.parameters():
+        grad = param.grad
+        if grad is None:
+            continue
+        if not torch.isfinite(grad).all():
+            return False
+    return True
+
+
 def _compute_training_loss(
     predictions: torch.Tensor,
     targets: torch.Tensor,
@@ -270,6 +300,7 @@ def train_epoch(
     model.train()
     total_loss = 0.0
     total_samples = 0
+    grad_clip = float(config.get("grad_clip", 1.0))
 
     for batch in dataloader:
         features, targets, sample_weights = _unpack_batch(batch)
@@ -277,8 +308,11 @@ def train_epoch(
         targets = targets.to(device)
         sample_weights_t = sample_weights.to(device) if sample_weights is not None else None
 
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
         predictions = model.forward_stacked(features)
+        if not torch.isfinite(predictions).all():
+            continue
+
         loss = _compute_training_loss(
             predictions=predictions,
             targets=targets,
@@ -289,16 +323,28 @@ def train_epoch(
             sample_weights=sample_weights_t,
         )
 
-        if torch.isfinite(loss) and loss.item() > 0:
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), config.get("grad_clip", 1.0))
-            optimizer.step()
+        if not torch.isfinite(loss) or loss.item() <= 0:
+            continue
 
-        loss_value = float(loss.item()) if torch.isfinite(loss) else 0.0
+        loss.backward()
+        if not _gradients_are_finite(model):
+            optimizer.zero_grad(set_to_none=True)
+            continue
+
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+        if not torch.isfinite(grad_norm):
+            optimizer.zero_grad(set_to_none=True)
+            continue
+
+        optimizer.step()
+
+        loss_value = float(loss.item())
         total_loss += loss_value * features.size(0)
         total_samples += features.size(0)
 
-    return total_loss / total_samples if total_samples > 0 else 0.0
+    if total_samples == 0:
+        return float("inf")
+    return total_loss / total_samples
 
 
 def validate_epoch(
@@ -325,6 +371,9 @@ def validate_epoch(
             sample_weights_t = sample_weights.to(device) if sample_weights is not None else None
 
             predictions = model.forward_stacked(features)
+            if not torch.isfinite(predictions).all():
+                return float("inf"), {}
+
             loss = _compute_training_loss(
                 predictions=predictions,
                 targets=targets,
@@ -334,8 +383,10 @@ def validate_epoch(
                 target_weights_tensor=target_weights_tensor,
                 sample_weights=sample_weights_t,
             )
+            if not torch.isfinite(loss):
+                return float("inf"), {}
 
-            loss_value = float(loss.item()) if torch.isfinite(loss) else 0.0
+            loss_value = float(loss.item())
             total_loss += loss_value * features.size(0)
             total_samples += features.size(0)
             all_preds.append(predictions.cpu().numpy())
@@ -350,7 +401,9 @@ def validate_epoch(
     else:
         metrics = {}
 
-    return total_loss / total_samples if total_samples > 0 else 0.0, metrics
+    if total_samples == 0:
+        return float("inf"), metrics
+    return total_loss / total_samples, metrics
 
 
 def train_model(
@@ -387,7 +440,9 @@ def train_model(
         "best_val_loss": float("inf"),
         "best_val_metrics": {},
     }
-    best_state = None
+    best_state = copy.deepcopy(model.state_dict())
+    nan_recovery_factor = float(config.get("nan_recovery_lr_factor", 0.5))
+    min_lr = float(config.get("min_learning_rate", 1e-7))
 
     for epoch in range(config["epochs"]):
         train_loss = train_epoch(
@@ -409,6 +464,24 @@ def train_model(
             config=config,
             target_weights_tensor=target_weights_tensor,
         )
+        if not np.isfinite(train_loss) or not np.isfinite(val_loss):
+            bad_entries = _find_nonfinite_model_entries(model)
+            current_lr = float(optimizer.param_groups[0]["lr"])
+            next_lr = max(current_lr * nan_recovery_factor, min_lr)
+            for group in optimizer.param_groups:
+                group["lr"] = next_lr
+            model.load_state_dict(best_state)
+            patience_counter += 1
+            print(
+                "  Warning: non-finite loss detected. "
+                f"Restored best state, lr {current_lr:.2e}->{next_lr:.2e}. "
+                f"Bad entries: {bad_entries if bad_entries else 'n/a'}"
+            )
+            if patience_counter >= config["patience"]:
+                print(f"  Early stopping at epoch {epoch + 1} after non-finite recovery attempts")
+                break
+            continue
+
         scheduler.step(val_loss)
 
         history["train_loss"].append(train_loss)
@@ -452,10 +525,132 @@ def train_model(
             print(f"  Early stopping at epoch {epoch + 1}")
             break
 
-    if best_state:
-        model.load_state_dict(best_state)
+    model.load_state_dict(best_state)
 
     return model, history
+
+
+def _train_final_model_with_retries(
+    X_scaled: np.ndarray,
+    y_transformed: np.ndarray,
+    sample_weights: np.ndarray,
+    target_names: List[str],
+    transform_types: Dict[str, str],
+    config: dict,
+    target_weights_tensor: torch.Tensor,
+    device: torch.device,
+    model_seed: int,
+) -> nn.Module:
+    """Train final full-data model with finite checks and learning-rate retries."""
+    final_epochs = int(min(config.get("final_epochs", 200), config["epochs"]))
+    lr_base = float(config["learning_rate"])
+    retry_multipliers = config.get("final_lr_retry_multipliers", [1.0, 0.5, 0.25])
+    retry_multipliers = [float(m) for m in retry_multipliers]
+
+    last_error: Optional[Exception] = None
+    grad_clip = float(config.get("grad_clip", 1.0))
+
+    for attempt_idx, multiplier in enumerate(retry_multipliers, start=1):
+        attempt_lr = lr_base * multiplier
+        print(
+            f"  Final model attempt {attempt_idx}/{len(retry_multipliers)} "
+            f"(lr={attempt_lr:.2e})"
+        )
+
+        full_loader_generator = torch.Generator()
+        full_loader_generator.manual_seed(model_seed + 99999 + attempt_idx)
+        full_loader = DataLoader(
+            SoilDataset(X_scaled, y_transformed, sample_weights),
+            batch_size=config["batch_size"],
+            shuffle=True,
+            generator=full_loader_generator,
+            drop_last=_should_drop_last_train_batch(
+                n_samples=len(X_scaled),
+                batch_size=config["batch_size"],
+            ),
+        )
+
+        set_global_seed(model_seed + 700000 + attempt_idx)
+        final_model = NationalSoilNet(
+            input_dim=config["input_dim"],
+            hidden_dim=config["hidden_dim"],
+            num_res_blocks=config["num_res_blocks"],
+            dropout=config["dropout"],
+            target_names=target_names,
+        ).to(device)
+
+        optimizer = torch.optim.AdamW(
+            final_model.parameters(),
+            lr=attempt_lr,
+            weight_decay=config["weight_decay"],
+        )
+
+        final_model.train()
+        successful_updates = 0
+
+        try:
+            for epoch in range(final_epochs):
+                epoch_updates = 0
+                for batch in full_loader:
+                    features, targets, batch_sample_weights = _unpack_batch(batch)
+                    features = features.to(device)
+                    targets = targets.to(device)
+                    batch_sample_weights_t = (
+                        batch_sample_weights.to(device) if batch_sample_weights is not None else None
+                    )
+
+                    optimizer.zero_grad(set_to_none=True)
+                    predictions = final_model.forward_stacked(features)
+                    if not torch.isfinite(predictions).all():
+                        continue
+
+                    loss = _compute_training_loss(
+                        predictions=predictions,
+                        targets=targets,
+                        target_names=target_names,
+                        transform_types=transform_types,
+                        config=config,
+                        target_weights_tensor=target_weights_tensor,
+                        sample_weights=batch_sample_weights_t,
+                    )
+                    if not torch.isfinite(loss) or loss.item() <= 0:
+                        continue
+
+                    loss.backward()
+                    if not _gradients_are_finite(final_model):
+                        optimizer.zero_grad(set_to_none=True)
+                        continue
+
+                    grad_norm = torch.nn.utils.clip_grad_norm_(final_model.parameters(), grad_clip)
+                    if not torch.isfinite(grad_norm):
+                        optimizer.zero_grad(set_to_none=True)
+                        continue
+
+                    optimizer.step()
+                    successful_updates += 1
+                    epoch_updates += 1
+
+                bad_entries = _find_nonfinite_model_entries(final_model)
+                if bad_entries:
+                    raise FloatingPointError(
+                        f"Non-finite parameters after epoch {epoch + 1}: {bad_entries}"
+                    )
+                if epoch_updates == 0:
+                    raise FloatingPointError(
+                        f"No valid optimizer updates in epoch {epoch + 1}."
+                    )
+
+            if successful_updates == 0:
+                raise FloatingPointError("No valid optimizer updates across final training.")
+
+            return final_model
+        except Exception as exc:  # pragma: no cover - exercised in Colab/runtime failures
+            last_error = exc
+            print(f"  Final model attempt failed: {exc}")
+
+    raise RuntimeError(
+        "Final model training failed after retries with non-finite values."
+    ) from last_error
 
 
 def _build_cv_splits(
@@ -701,61 +896,23 @@ def train_ensemble(
 
         # Train final model on all data
         print(f"\n  Training final model {model_idx + 1} on all data...")
-        full_loader_generator = torch.Generator()
-        full_loader_generator.manual_seed(model_seed + 99999)
-        full_loader = DataLoader(
-            SoilDataset(X_scaled, y_transformed, sample_weights),
-            batch_size=config["batch_size"],
-            shuffle=True,
-            generator=full_loader_generator,
-            drop_last=_should_drop_last_train_batch(
-                n_samples=len(X_scaled),
-                batch_size=config["batch_size"],
-            ),
-        )
-
-        final_model = NationalSoilNet(
-            input_dim=config["input_dim"],
-            hidden_dim=config["hidden_dim"],
-            num_res_blocks=config["num_res_blocks"],
-            dropout=config["dropout"],
+        final_model = _train_final_model_with_retries(
+            X_scaled=X_scaled,
+            y_transformed=y_transformed,
+            sample_weights=sample_weights,
             target_names=target_names,
-        ).to(device)
-
-        optimizer = torch.optim.AdamW(
-            final_model.parameters(),
-            lr=config["learning_rate"],
-            weight_decay=config["weight_decay"],
+            transform_types=transform_types,
+            config=config,
+            target_weights_tensor=target_weights_tensor,
+            device=device,
+            model_seed=model_seed,
         )
 
-        final_model.train()
-        final_epochs = int(min(config.get("final_epochs", 200), config["epochs"]))
-        for _ in range(final_epochs):
-            for batch in full_loader:
-                features, targets, batch_sample_weights = _unpack_batch(batch)
-                features = features.to(device)
-                targets = targets.to(device)
-                batch_sample_weights_t = (
-                    batch_sample_weights.to(device) if batch_sample_weights is not None else None
-                )
-
-                optimizer.zero_grad()
-                predictions = final_model.forward_stacked(features)
-                loss = _compute_training_loss(
-                    predictions=predictions,
-                    targets=targets,
-                    target_names=target_names,
-                    transform_types=transform_types,
-                    config=config,
-                    target_weights_tensor=target_weights_tensor,
-                    sample_weights=batch_sample_weights_t,
-                )
-                if torch.isfinite(loss) and loss.item() > 0:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(
-                        final_model.parameters(), config.get("grad_clip", 1.0)
-                    )
-                    optimizer.step()
+        bad_entries = _find_nonfinite_model_entries(final_model)
+        if bad_entries:
+            raise RuntimeError(
+                f"Refusing to save non-finite model_{model_idx + 1}: {bad_entries}"
+            )
 
         model_path = output_dir / f"model_{model_idx + 1}.pth"
         save_config = dict(config)
@@ -844,8 +1001,13 @@ def load_training_data(
     print(f"  Found {len(feature_cols)} features, targets: {valid_targets}")
     X = df[feature_cols].values.astype(np.float32)
     y = df[valid_targets].values.astype(np.float32)
+    y[~np.isfinite(y)] = np.nan
 
-    valid_mask = ~np.isnan(X).any(axis=1)
+    finite_feature_mask = np.isfinite(X).all(axis=1)
+    target_observed_mask = ~np.isnan(y).all(axis=1)
+    valid_mask = finite_feature_mask & target_observed_mask
+    dropped_nonfinite_features = int((~finite_feature_mask).sum())
+    dropped_no_targets = int((~target_observed_mask).sum())
 
     groups: Optional[np.ndarray] = None
     group_by = group_by.lower()
@@ -863,6 +1025,10 @@ def load_training_data(
     if groups is not None:
         groups = groups[valid_mask]
 
+    if dropped_nonfinite_features > 0:
+        print(f"  Dropped {dropped_nonfinite_features} rows with non-finite feature values")
+    if dropped_no_targets > 0:
+        print(f"  Dropped {dropped_no_targets} rows with no observed targets")
     print(f"  Samples with valid features: {len(X)}")
 
     if not return_metadata:
