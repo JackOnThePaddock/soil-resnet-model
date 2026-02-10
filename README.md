@@ -1,8 +1,8 @@
 # NationalSoilNet: Multi-Target Soil Property Prediction from Satellite Embeddings
 
-NationalSoilNet is a ResNet-based ensemble model that predicts seven key soil properties from 64-band AlphaEarth satellite embeddings. Trained on 2,625 Australian soil samples (0--15 cm depth) sourced from the ANSIS/TERN portal, the model delivers strong predictive performance across pH, CEC, ESP, SOC, Ca, Mg, and Na, with R-squared values ranging from 0.805 to 0.959 on a held-out test set.
+NationalSoilNet is a ResNet-based ensemble model that predicts seven key soil properties from 64-band AlphaEarth satellite embeddings. Trained on 3,534 Australian soil samples (0--15 cm depth, 2017--2025) sourced from the ANSIS/TERN portal, the model predicts pH, CEC, ESP, SOC, Ca, Mg, and Na.
 
-The system uses an ensemble of five independently seeded models, each trained with five-fold cross-validation, to produce both point predictions and calibrated uncertainty estimates. A downstream national-to-local calibration step using CatBoost enables adaptation to individual farm sites with minimal local data.
+The system uses an ensemble of five independently seeded models with five-fold cross-validation to produce both point predictions and uncertainty estimates (ensemble standard deviation). A downstream national-to-local calibration step using CatBoost is recommended for farm-level applications.
 
 ---
 
@@ -46,19 +46,32 @@ Each `ResidualBlock` consists of two linear layers with batch normalisation, SiL
 
 ## Results
 
-Holdout test set performance for each soil property target:
+### Training Data Performance
 
-| Target | N Test | R-squared | RMSE (raw) | MAE (raw) |
-|--------|--------|-----------|------------|-----------|
-| pH     | 698    | 0.809     | 0.446      | 0.343     |
-| CEC    | 130    | 0.959     | 3.434      | 2.607     |
-| ESP    | 100    | 0.841     | 1.609      | 0.901     |
-| SOC    | 150    | 0.870     | 1.524      | 0.739     |
-| Ca     | 338    | 0.929     | 2.603      | 1.900     |
-| Mg     | 327    | 0.926     | 1.187      | 0.814     |
-| Na     | 234    | 0.805     | 0.239      | 0.115     |
+In-sample metrics (3,534 samples -- the final models were trained on all data):
 
-All metrics are computed on a stratified holdout set that was excluded from training and cross-validation. The varying test set sizes reflect per-target data availability, as the model uses masked loss to handle missing values.
+| Target | N | R² | RMSE | MAE | Unit |
+|--------|---|-----|------|-----|------|
+| pH | 3,511 | 0.815 | 0.446 | 0.337 | pH |
+| CEC | 694 | 0.952 | 3.321 | 2.425 | cmol/kg |
+| ESP | 563 | 0.785 | 1.367 | 0.827 | % |
+| SOC | 755 | 0.904 | 1.193 | 0.727 | % |
+| Ca | 1,823 | 0.918 | 2.435 | 1.752 | cmol/kg |
+| Mg | 1,775 | 0.924 | 1.243 | 0.866 | cmol/kg |
+| Na | 1,309 | 0.894 | 0.190 | 0.102 | cmol/kg |
+
+### Independent Validation
+
+True generalisation performance on data **never seen during training** (zero overlap confirmed):
+
+| Target | National (1,368) R² | Speirs Farm (60) R² |
+|--------|---------------------|---------------------|
+| pH | 0.606 | -0.914 |
+| CEC | 0.817 | 0.214 |
+| ESP | 0.363 | 0.464 |
+| Na | 0.559 | 0.536 |
+
+CEC generalises best (R² = 0.817). pH and ESP show significant performance drops on unseen data, and the model fails on the Speirs farm for pH (negative R²), highlighting the need for national-to-local calibration for farm-level applications. See [RESULTS.md](RESULTS.md) for full analysis including per-paddock breakdowns and ESP derivation experiments.
 
 ---
 
@@ -157,7 +170,7 @@ python scripts/predict_farm.py \
 
 ## Data Sources
 
-- **Soil samples**: 2,625 samples at 0--15 cm depth from the Australian National Soil Information System (ANSIS) via the TERN Soil Data API. Samples span 2017--2025 and cover diverse Australian soil types and land uses.
+- **Soil samples**: 3,534 samples (2,823 unique locations) at 0--15 cm depth from the Australian National Soil Information System (ANSIS) via the TERN Soil Data API. Samples span 2017--2025 and cover diverse Australian soil types and land uses.
 - **Satellite features**: 64-band AlphaEarth embedding composites extracted from Google Earth Engine. Five-year median composites are used with NDVI-based vegetation masking to reduce crop/pasture signal interference.
 - **Targets**: pH (CaCl2), Cation Exchange Capacity (CEC, cmol(+)/kg), Exchangeable Sodium Percentage (ESP, %), Soil Organic Carbon (SOC, %), Exchangeable Calcium (Ca, cmol(+)/kg), Exchangeable Magnesium (Mg, cmol(+)/kg), Exchangeable Sodium (Na, cmol(+)/kg).
 

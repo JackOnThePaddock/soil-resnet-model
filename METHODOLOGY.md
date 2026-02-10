@@ -29,7 +29,7 @@ Soil samples were obtained from the Australian National Soil Information System 
 - **Depth interval**: 0--15 cm (topsoil). All samples with upper depth between 0 and 5 cm and lower depth between 10 and 20 cm were included and attributed to the 0--15 cm layer. Samples outside this range were excluded.
 - **Temporal window**: 2017--2025. This window aligns with the availability period of AlphaEarth satellite embeddings and ensures that land use conditions at the time of soil sampling are reasonably consistent with the satellite imagery.
 - **Geographic extent**: Continental Australia, spanning arid, semi-arid, temperate, subtropical, and tropical climate zones.
-- **Final dataset size**: 2,625 unique sample locations after deduplication, quality filtering, and removal of records with no valid target values.
+- **Final dataset size**: 3,534 samples (from 2,823 unique locations) after combining year-specific files (2017--2025), quality filtering, and excluding rows with missing AlphaEarth features. The raw data contains 3,669 rows across 9 year-specific files; 135 rows were dropped due to incomplete satellite coverage.
 
 ### Target Variables
 
@@ -162,21 +162,23 @@ The final model is an ensemble of five independently trained NationalSoilNet ins
 
 ### Cross-Validation
 
-Within each ensemble member, five-fold cross-validation is used:
+Within each ensemble member, five-fold cross-validation is used to estimate performance:
 
-1. The training data (excluding the holdout test set) is split into five stratified folds.
+1. The full training set is split into five folds.
 2. Each fold is used once as a validation set while the remaining four folds are used for training.
-3. The best model checkpoint (by validation loss) from each fold is retained.
-4. At inference time, predictions from all five folds of all five ensemble members (25 models total) can be averaged, or a single best-fold model per ensemble member can be used.
+3. Validation metrics from each fold are logged to monitor convergence and overfitting.
+4. After cross-validation, a **final model is retrained on the entire dataset** (all folds combined) for up to 200 epochs and saved as the production model.
+
+**Important caveat**: Because the saved ensemble models are trained on all available data, there is no true held-out test set. Metrics computed on the training data are optimistically biased. See the Evaluation section and RESULTS.md for independent validation on unseen data.
 
 ### Optimiser and Learning Rate
 
-- **Optimiser**: AdamW with learning rate `1e-4` and weight decay `1e-5`. AdamW decouples weight decay from the gradient update, providing more consistent regularisation than L2 penalty in Adam.
+- **Optimiser**: AdamW with learning rate `1e-4` and weight decay `1e-4`. AdamW decouples weight decay from the gradient update, providing more consistent regularisation than L2 penalty in Adam.
 - **Learning rate scheduler**: `ReduceLROnPlateau` monitoring validation loss, with patience of 20 epochs and a reduction factor of 0.5. The learning rate is halved each time validation loss fails to improve for 20 consecutive epochs.
 
 ### Regularisation
 
-- **Early stopping**: Training terminates if validation loss does not improve for 50 consecutive epochs. The model checkpoint with the lowest validation loss is restored.
+- **Early stopping**: Training terminates if validation loss does not improve for 30 consecutive epochs. The model checkpoint with the lowest validation loss is restored.
 - **Gradient clipping**: Gradients are clipped to a maximum norm of 1.0 to prevent exploding gradients.
 - **Dropout**: Applied within each residual block.
 - **Weight decay**: Applied via AdamW (1e-5).
@@ -193,11 +195,27 @@ where `N_valid` is the number of non-missing target values in the batch, and the
 
 ### Feature Normalisation
 
-All 64 input features are normalised using `StandardScaler` (zero mean, unit variance), fitted on the training split only. The scaler parameters are saved alongside each model checkpoint to ensure consistent normalisation at inference time. Target values are not normalised.
+All 64 input features are normalised using `StandardScaler` (zero mean, unit variance), fitted on the full training set. The scaler parameters are saved as `scaler.pkl` alongside the model checkpoints.
+
+### Target Normalisation
+
+Target values were z-score normalised (zero mean, unit variance) before training. The normalisation parameters per target are:
+
+| Target | Mean | Std |
+|--------|------|-----|
+| pH | 6.095 | 1.037 |
+| CEC | 14.249 | 15.106 |
+| ESP | 2.260 | 2.945 |
+| SOC | 3.401 | 3.854 |
+| Ca | 7.447 | 8.513 |
+| Mg | 3.460 | 4.508 |
+| Na | 0.290 | 0.584 |
+
+Model outputs are in normalised space and must be denormalised for interpretation: `raw = normalised * std + mean`. The target normalisation parameters are **not** stored in the model checkpoints and must be computed from the training data (`data/processed/features.csv`).
 
 ### Training Budget
 
-Each model is trained for up to 1,000 epochs, though early stopping typically terminates training well before this limit (typically between 200 and 500 epochs depending on the fold and target data availability).
+Each model is trained for up to 300 epochs, though early stopping typically terminates training well before this limit.
 
 ### Hyperparameter Summary
 
@@ -210,13 +228,13 @@ Each model is trained for up to 1,000 epochs, though early stopping typically te
 | Activation function | SiLU |
 | Optimiser | AdamW |
 | Learning rate | 1e-4 |
-| Weight decay | 1e-5 |
+| Weight decay | 1e-4 |
 | LR scheduler | ReduceLROnPlateau |
 | LR scheduler patience | 20 epochs |
 | LR scheduler factor | 0.5 |
-| Early stopping patience | 50 epochs |
+| Early stopping patience | 30 epochs |
 | Gradient clipping max norm | 1.0 |
-| Maximum epochs | 1000 |
+| Maximum epochs | 300 |
 | Ensemble size | 5 models |
 | Cross-validation folds | 5 |
 | Feature normalisation | StandardScaler |
@@ -322,10 +340,6 @@ Uncertainty maps are generated alongside prediction maps for each soil property.
 
 ## 8. Evaluation
 
-### Holdout Test Set
-
-A stratified holdout set was reserved before any model training. Stratification was performed by geographic region and target value distribution to ensure the test set is representative of the full data range. This set was never used for training, validation, or hyperparameter tuning.
-
 ### Metrics
 
 Three metrics are reported for each target:
@@ -336,23 +350,57 @@ Three metrics are reported for each target:
 
 ### Per-Target Evaluation
 
-Because data availability varies across targets (e.g., 698 test samples for pH but only 100 for ESP), metrics are computed independently for each target on its available test samples.
+Because data availability varies across targets (e.g., 3,511 samples for pH but only 563 for ESP), metrics are computed independently for each target on its available samples.
 
-### Holdout Results
+### Training Data Metrics
 
-| Target | N Test | R-squared | RMSE (raw) | MAE (raw) |
-|--------|--------|-----------|------------|-----------|
-| pH     | 698    | 0.809     | 0.446      | 0.343     |
-| CEC    | 130    | 0.959     | 3.434      | 2.607     |
-| ESP    | 100    | 0.841     | 1.609      | 0.901     |
-| SOC    | 150    | 0.870     | 1.524      | 0.739     |
-| Ca     | 338    | 0.929     | 2.603      | 1.900     |
-| Mg     | 327    | 0.926     | 1.187      | 0.814     |
-| Na     | 234    | 0.805     | 0.239      | 0.115     |
+The final ensemble models were each trained on the full dataset (3,534 samples) after K-fold cross-validation. Metrics computed on this data are therefore **in-sample** and reflect an upper bound on performance:
 
-### Paddock-Holdout Cross-Validation
+| Target | N | R² | RMSE | MAE |
+|--------|---|-----|------|-----|
+| pH | 3,511 | 0.815 | 0.446 | 0.337 |
+| CEC | 694 | 0.952 | 3.321 | 2.425 |
+| ESP | 563 | 0.785 | 1.367 | 0.827 |
+| SOC | 755 | 0.904 | 1.193 | 0.727 |
+| Ca | 1,823 | 0.918 | 2.435 | 1.752 |
+| Mg | 1,775 | 0.924 | 1.243 | 0.866 |
+| Na | 1,309 | 0.894 | 0.190 | 0.102 |
 
-In addition to the standard holdout evaluation, a spatial cross-validation scheme was employed where entire paddocks (contiguous management units) were held out. This tests the model's ability to generalise to new spatial locations rather than interpolating between nearby training samples. Results from paddock-holdout CV are reported separately and provide a more conservative estimate of real-world predictive performance.
+### Independent Validation
+
+To assess true generalisation, the ensemble was evaluated on two datasets with **zero overlap** with the training data (confirmed by comparing all 64-dimensional feature vectors):
+
+**National Independent Dataset** (1,368 ANSIS samples with AlphaEarth features):
+
+| Target | N | R² | RMSE | MAE |
+|--------|---|-----|------|-----|
+| pH | 1,367 | 0.606 | 0.577 | 0.448 |
+| CEC | 364 | 0.817 | 8.022 | 5.533 |
+| ESP | 380 | 0.363 | 2.257 | 1.541 |
+| Na | 988 | 0.559 | 0.449 | 0.197 |
+
+**Speirs Farm** (60 samples with laboratory analysis):
+
+| Target | N | R² | RMSE | MAE |
+|--------|---|-----|------|-----|
+| pH | 60 | -0.914 | 0.550 | 0.455 |
+| CEC | 60 | 0.214 | 2.754 | 1.735 |
+| ESP | 60 | 0.464 | 2.110 | 1.801 |
+| Na | 60 | 0.536 | 0.244 | 0.193 |
+
+The substantial drop from training to independent metrics (e.g., pH: 0.815 to 0.606; ESP: 0.785 to 0.363) confirms significant overfitting. The negative pH R² on the Speirs farm indicates the model predicts worse than the mean for that site, which has predominantly acidic soils (pH 4.3--7.0) underrepresented in the national training distribution.
+
+### ESP: Direct vs Derived Prediction
+
+Since ESP = (Na / CEC) × 100, computing ESP from the model's Na and CEC predictions was compared against the direct ESP prediction head. On the Speirs farm, the derived approach outperforms (R² = 0.552 vs 0.464), while on national data the direct head is slightly better (R² = 0.363 vs 0.277). Neither is reliable enough for precision applications without local calibration.
+
+### Implications
+
+These findings demonstrate that:
+
+1. **National-to-local calibration is not optional** — it is essential for farm-level predictions.
+2. **CEC generalises best** (R² = 0.817 on independent data), making it the most trustworthy target for uncalibrated national predictions.
+3. **A proper train/test split** (with the test set truly excluded from the final model training) is needed for honest reporting of generalisation performance.
 
 ---
 
