@@ -30,10 +30,11 @@ desktop.ini
 .ipynb_checkpoints/
 
 # Data (large files tracked separately)
-data/processed/*.csv
 data/processed/*.parquet
 data/processed/*.db
 !data/processed/README.md
+!data/processed/features.csv
+!data/processed/features_normalized.csv
 
 # Environment
 .env
