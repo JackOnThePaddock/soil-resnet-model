@@ -5,6 +5,7 @@ import argparse
 from pathlib import Path
 import sys
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,9 +14,17 @@ from src.features.bare_earth import (  # noqa: E402
     DEFAULT_BAREST_EARTH_BANDS,
     DEFAULT_COVERAGE_ID,
     DEA_OWS_BASE_URL,
+    sample_bare_earth_chips_via_wcs,
     sample_bare_earth_points_via_wcs,
 )
-from src.features.spectral_gpt import SpectralGPTConfig, train_spectral_gpt_embeddings  # noqa: E402
+from src.features.spectral_gpt import (  # noqa: E402
+    OFFICIAL_SPECTRALGPT_PLUS_URL,
+    OfficialSpectralGPTConfig,
+    OfficialSpectralGPTEncoder,
+    SpectralGPTConfig,
+    reduce_embeddings_with_pca,
+    train_spectral_gpt_embeddings,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -66,8 +75,69 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=12, help="Parallel WCS requests")
     parser.add_argument("--timeout", type=int, default=120, help="HTTP timeout per request (seconds)")
     parser.add_argument("--retries", type=int, default=3, help="Retries per point")
-    parser.add_argument("--spectral-dim", type=int, default=16, help="Spectral embedding dimension")
+    parser.add_argument(
+        "--spectral-backend",
+        type=str,
+        default="official_pretrained",
+        choices=["official_pretrained", "lite"],
+        help="Embedding backend: official pretrained SpectralGPT or lightweight approximation",
+    )
+    parser.add_argument("--spectral-dim", type=int, default=16, help="Final embedding dimension")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--official-checkpoint",
+        type=str,
+        default=None,
+        help="Optional local path to SpectralGPT+.pth checkpoint",
+    )
+    parser.add_argument(
+        "--official-checkpoint-url",
+        type=str,
+        default=OFFICIAL_SPECTRALGPT_PLUS_URL,
+        help="Download URL for official checkpoint if --official-checkpoint is not provided",
+    )
+    parser.add_argument(
+        "--official-repo-dir",
+        type=str,
+        default=None,
+        help="Optional local clone path for official SpectralGPT repo",
+    )
+    parser.add_argument(
+        "--official-model-name",
+        type=str,
+        default="mae_vit_base_patch8_128",
+        help="Official model constructor name",
+    )
+    parser.add_argument(
+        "--official-encode-batch-size",
+        type=int,
+        default=16,
+        help="Batch size for official SpectralGPT encoder inference",
+    )
+    parser.add_argument(
+        "--official-chip-size",
+        type=int,
+        default=128,
+        help="Spatial chip size in pixels for official SpectralGPT input",
+    )
+    parser.add_argument(
+        "--official-pixel-size-m",
+        type=float,
+        default=10.0,
+        help="Chip pixel size in meters for WCS request windows",
+    )
+    parser.add_argument(
+        "--official-request-chunk-size",
+        type=int,
+        default=64,
+        help="Number of points per WCS chip batch when using official backend",
+    )
+    parser.add_argument(
+        "--output-official-raw-csv",
+        type=str,
+        default=None,
+        help="Optional CSV path to save raw official embedding vectors before PCA",
+    )
     return parser.parse_args()
 
 
@@ -147,9 +217,66 @@ def main() -> None:
         output_prefix="be_",
     )
 
-    print("Training SpectralGPT embeddings...")
-    cfg = SpectralGPTConfig(embedding_dim=args.spectral_dim, seed=args.seed)
-    embeddings = train_spectral_gpt_embeddings(be_df.values, config=cfg)
+    if args.spectral_backend == "lite":
+        print("Training lightweight SpectralGPT-style embeddings...")
+        cfg = SpectralGPTConfig(embedding_dim=args.spectral_dim, seed=args.seed)
+        embeddings = train_spectral_gpt_embeddings(be_df.values, config=cfg)
+        raw_official_embeddings = None
+    else:
+        print("Extracting embeddings with official pretrained SpectralGPT...")
+        official_cfg = OfficialSpectralGPTConfig(
+            checkpoint_path=args.official_checkpoint,
+            checkpoint_url=args.official_checkpoint_url,
+            repo_dir=args.official_repo_dir,
+            model_name=args.official_model_name,
+            batch_size=args.official_encode_batch_size,
+            seed=args.seed,
+        )
+        encoder = OfficialSpectralGPTEncoder(config=official_cfg)
+
+        raw_chunks: list[np.ndarray] = []
+        chunk_size = max(1, int(args.official_request_chunk_size))
+        total = len(joined_df)
+        for start in range(0, total, chunk_size):
+            end = min(start + chunk_size, total)
+            print(f"  Official chip batch {start}:{end} / {total}")
+            subset = joined_df.iloc[start:end]
+            chips = sample_bare_earth_chips_via_wcs(
+                points_df=subset,
+                lon_col=args.lon_col.lower(),
+                lat_col=args.lat_col.lower(),
+                base_url=args.base_url,
+                coverage_id=args.coverage_id,
+                bands=bands,
+                patch_size=int(args.official_chip_size),
+                pixel_size_m=float(args.official_pixel_size_m),
+                max_workers=args.workers,
+                timeout=args.timeout,
+                retries=args.retries,
+            )
+            raw_chunks.append(encoder.encode_chips(chips, band_names=bands))
+
+        raw_official_embeddings = (
+            np.vstack(raw_chunks) if raw_chunks else np.zeros((0, 0), dtype=np.float32)
+        )
+        if raw_official_embeddings.shape[0] != len(joined_df):
+            raise RuntimeError(
+                "Official embedding row mismatch: "
+                f"expected {len(joined_df)}, got {raw_official_embeddings.shape[0]}"
+            )
+
+        if (
+            int(args.spectral_dim) > 0
+            and raw_official_embeddings.shape[1] != int(args.spectral_dim)
+        ):
+            embeddings = reduce_embeddings_with_pca(
+                raw_official_embeddings,
+                n_components=int(args.spectral_dim),
+                random_state=int(args.seed),
+            )
+        else:
+            embeddings = raw_official_embeddings.astype(np.float32)
+
     emb_cols = [f"sgpt_{i:02d}" for i in range(embeddings.shape[1])]
     emb_df = pd.DataFrame(embeddings, columns=emb_cols, index=joined_df.index)
 
@@ -164,6 +291,16 @@ def main() -> None:
         emb_path = out_path.with_name(f"{out_path.stem}_embeddings.csv")
     emb_path.parent.mkdir(parents=True, exist_ok=True)
     emb_df.to_csv(emb_path, index=False)
+
+    if raw_official_embeddings is not None and args.output_official_raw_csv:
+        raw_path = Path(args.output_official_raw_csv)
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_cols = [f"sgpt_raw_{i:03d}" for i in range(raw_official_embeddings.shape[1])]
+        pd.DataFrame(raw_official_embeddings, columns=raw_cols).to_csv(raw_path, index=False)
+        print(
+            f"Saved raw official embeddings: {raw_path} "
+            f"({raw_official_embeddings.shape[0]} x {raw_official_embeddings.shape[1]})"
+        )
 
     missing_pct = float(be_df.isna().mean().mean() * 100.0)
     print(

@@ -293,6 +293,140 @@ def sample_bare_earth_points_via_wcs(
     return pd.DataFrame(values, columns=columns, index=points_df.index)
 
 
+def _center_pad_or_crop(
+    arr: np.ndarray,
+    out_h: int,
+    out_w: int,
+) -> np.ndarray:
+    """Center pad/crop [C,H,W] array to target spatial size."""
+    if arr.ndim != 3:
+        raise ValueError(f"Expected [C,H,W], got {arr.shape}")
+    c, h, w = arr.shape
+    out = np.full((c, out_h, out_w), np.nan, dtype=np.float32)
+
+    src_h0 = max(0, (h - out_h) // 2)
+    src_w0 = max(0, (w - out_w) // 2)
+    src_h1 = min(h, src_h0 + out_h)
+    src_w1 = min(w, src_w0 + out_w)
+
+    copy_h = src_h1 - src_h0
+    copy_w = src_w1 - src_w0
+
+    dst_h0 = max(0, (out_h - copy_h) // 2)
+    dst_w0 = max(0, (out_w - copy_w) // 2)
+    dst_h1 = dst_h0 + copy_h
+    dst_w1 = dst_w0 + copy_w
+
+    out[:, dst_h0:dst_h1, dst_w0:dst_w1] = arr[:, src_h0:src_h1, src_w0:src_w1]
+    return out
+
+
+def sample_bare_earth_chips_via_wcs(
+    points_df: pd.DataFrame,
+    lon_col: str = "lon",
+    lat_col: str = "lat",
+    base_url: str = DEA_OWS_BASE_URL,
+    coverage_id: str = DEFAULT_COVERAGE_ID,
+    bands: Sequence[str] = DEFAULT_BAREST_EARTH_BANDS,
+    patch_size: int = 128,
+    pixel_size_m: float = 10.0,
+    max_workers: int = 8,
+    timeout: int = 120,
+    retries: int = 3,
+) -> np.ndarray:
+    """
+    Fetch fixed-size bare-earth chips around point locations via DEA WCS.
+
+    Returns:
+        np.ndarray of shape [N, patch_size, patch_size, n_bands].
+    """
+    from pyproj import Transformer
+    from rasterio.io import MemoryFile
+
+    if lon_col not in points_df.columns or lat_col not in points_df.columns:
+        raise ValueError(f"Expected columns '{lon_col}' and '{lat_col}' in points dataframe")
+    if not bands:
+        raise ValueError("At least one band must be provided")
+    if patch_size <= 0:
+        raise ValueError("patch_size must be > 0")
+
+    lon = pd.to_numeric(points_df[lon_col], errors="coerce")
+    lat = pd.to_numeric(points_df[lat_col], errors="coerce")
+    if lon.isna().any() or lat.isna().any():
+        raise ValueError("Found non-numeric or missing lon/lat values")
+
+    lon_arr = lon.values.astype(np.float64)
+    lat_arr = lat.values.astype(np.float64)
+    n = len(points_df)
+    n_bands = len(bands)
+
+    # Deduplicate exact coordinate pairs to avoid repeated network calls.
+    keys = [f"{x:.10f},{y:.10f}" for x, y in zip(lon_arr, lat_arr)]
+    key_to_rows: Dict[str, List[int]] = {}
+    for i, key in enumerate(keys):
+        key_to_rows.setdefault(key, []).append(i)
+    unique_keys = list(key_to_rows.keys())
+    unique_lonlat = [tuple(map(float, k.split(","))) for k in unique_keys]
+
+    transformer = Transformer.from_crs("EPSG:4326", DEFAULT_CRS, always_xy=True)
+    unique_xy = [transformer.transform(x, y) for x, y in unique_lonlat]
+    unique_chips = np.full(
+        (len(unique_keys), patch_size, patch_size, n_bands),
+        np.nan,
+        dtype=np.float32,
+    )
+    half_span = float(patch_size) * float(pixel_size_m) / 2.0
+
+    def _fetch_chip(x: float, y: float) -> np.ndarray:
+        xmin, xmax = x - half_span, x + half_span
+        ymin, ymax = y - half_span, y + half_span
+        params = _wcs_getcoverage_params(
+            xmin=xmin,
+            ymin=ymin,
+            xmax=xmax,
+            ymax=ymax,
+            coverage_id=coverage_id,
+            bands=bands,
+        )
+
+        for attempt in range(1, retries + 1):
+            try:
+                response = requests.get(base_url, params=params, timeout=timeout)
+                response.raise_for_status()
+                with MemoryFile(response.content) as memfile:
+                    with memfile.open() as src:
+                        arr = src.read(masked=True).astype(np.float32)
+                        arr = np.ma.filled(arr, np.nan)
+                        arr = _center_pad_or_crop(arr, out_h=patch_size, out_w=patch_size)
+                        if arr.shape[0] != n_bands:
+                            out = np.full((n_bands, patch_size, patch_size), np.nan, dtype=np.float32)
+                            copy = min(n_bands, arr.shape[0])
+                            out[:copy] = arr[:copy]
+                            arr = out
+                        return np.moveaxis(arr, 0, -1).astype(np.float32)
+            except Exception:
+                if attempt < retries:
+                    time.sleep(0.5 * attempt)
+                else:
+                    break
+        return np.full((patch_size, patch_size, n_bands), np.nan, dtype=np.float32)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_idx = {
+            executor.submit(_fetch_chip, x, y): i
+            for i, (x, y) in enumerate(unique_xy)
+        }
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            unique_chips[idx] = future.result()
+
+    chips = np.full((n, patch_size, patch_size, n_bands), np.nan, dtype=np.float32)
+    for key_idx, key in enumerate(unique_keys):
+        for row_idx in key_to_rows[key]:
+            chips[row_idx] = unique_chips[key_idx]
+    return chips
+
+
 def sample_bare_earth_at_points(
     raster_path: Path,
     points_df: pd.DataFrame,

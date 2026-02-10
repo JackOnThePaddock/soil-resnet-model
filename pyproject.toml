@@ -26,6 +26,10 @@ classifiers = [
 
 dependencies = [
     "torch>=2.0",
+    "timm>=0.9",
+    "einops>=0.7",
+    "simplejson>=3.19",
+    "iopath>=0.1.10",
     "numpy>=1.24",
     "pandas>=2.0",
     "scikit-learn>=1.3",

@@ -225,6 +225,24 @@ python scripts/build_fused_features.py \
     --applications-csv data/farm/management_applications.csv
 ```
 
+Use the official pretrained SpectralGPT checkpoint (`SpectralGPT+.pth`) for point chips:
+
+```bash
+python scripts/pull_bare_earth_embeddings.py \
+    --normalized-csv data/processed/features_normalized.csv \
+    --points-csv data/processed/features.csv \
+    --output-csv data/processed/features_normalized_bareearth_sgpt.csv \
+    --output-embeddings-csv data/processed/features_normalized_sgpt_embeddings.csv \
+    --spectral-backend official_pretrained \
+    --spectral-dim 16 \
+    --official-request-chunk-size 64 \
+    --output-official-raw-csv data/processed/features_normalized_sgpt_official_raw.csv
+```
+
+Notes:
+- The script will clone the official SpectralGPT repo and download `SpectralGPT+.pth` automatically if not present.
+- DEA bare-earth has 10 Sentinel-2 bands; official SpectralGPT expects 12. Missing B1 and B9 are proxied from nearest available bands during preprocessing.
+
 Train fused model:
 
 ```bash
