@@ -1,0 +1,63 @@
+# NationalSoilNet configuration for fused AlphaEarth + BareEarth + SpectralGPT features.
+
+model:
+  input_dim: 90          # Auto-overridden by train script if detected features differ
+  hidden_dim: 192
+  num_blocks: 3
+  dropout: 0.2
+  activation: silu
+
+targets:
+  - pH
+  - CEC
+  - ESP
+  - SOC
+  - Ca
+  - Mg
+  - Na
+
+training:
+  ensemble_size: 5
+  n_splits: 5
+  epochs: 350
+  final_epochs: 220
+  batch_size: 32
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  patience: 35
+  lr_patience: 20
+  lr_factor: 0.5
+  grad_clip: 1.0
+  cv_strategy: "group_kfold"
+  loss_name: "weighted_huber"
+  huber_delta: 1.0
+  esp_consistency_weight: 0.08
+  target_weight_mode: "inverse_frequency"
+  sample_weight_mode: "rare_target_average"
+  auto_target_transforms: true
+  target_transforms:
+    ph: identity
+    cec: log1p
+    esp: log1p
+    soc: log1p
+    ca: log1p
+    mg: log1p
+    na: log1p
+  specialist_targets: ["cec", "esp", "soc"]
+  specialist_epochs: 150
+  specialist_patience: 25
+  specialist_val_fraction: 0.2
+  specialist_blend_weight: 0.4
+  random_seed: 42
+
+data:
+  feature_prefix: "feat_"
+  n_features: null       # Optional; null lets script infer actual fused feature count
+  group_by: "latlon"
+  group_round: 4
+  reference_data: data/validation/national_independent_1368.csv
+
+output:
+  model_dir: "models/resnet_fused"
+  metrics_dir: "results/metrics"
+  scaler_file: "scaler.pkl"

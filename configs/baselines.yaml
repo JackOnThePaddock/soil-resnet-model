@@ -11,7 +11,7 @@ targets:
 
 data:
   depth_filter: "0-15cm"
-  feature_prefix: "AE_"
+  feature_prefix: "band_"
   n_features: 64
   test_size: 0.2
   random_seed: 42

@@ -50,7 +50,7 @@ Each `ResidualBlock` consists of two linear layers with batch normalisation, SiL
 
 In-sample metrics (3,534 samples -- the final models were trained on all data):
 
-| Target | N | R² | RMSE | MAE | Unit |
+| Target | N | R2 | RMSE | MAE | Unit |
 |--------|---|-----|------|-----|------|
 | pH | 3,511 | 0.815 | 0.446 | 0.337 | pH |
 | CEC | 694 | 0.952 | 3.321 | 2.425 | cmol/kg |
@@ -64,14 +64,14 @@ In-sample metrics (3,534 samples -- the final models were trained on all data):
 
 True generalisation performance on data **never seen during training** (zero overlap confirmed):
 
-| Target | National (1,368) R² | Speirs Farm (60) R² |
+| Target | National (1,368) R2 | Speirs Farm (60) R2 |
 |--------|---------------------|---------------------|
 | pH | 0.606 | -0.914 |
 | CEC | 0.817 | 0.214 |
 | ESP | 0.363 | 0.464 |
 | Na | 0.559 | 0.536 |
 
-CEC generalises best (R² = 0.817). pH and ESP show significant performance drops on unseen data, and the model fails on the Speirs farm for pH (negative R²), highlighting the need for national-to-local calibration for farm-level applications. See [RESULTS.md](RESULTS.md) for full analysis including per-paddock breakdowns and ESP derivation experiments.
+CEC generalises best (R2 = 0.817). pH and ESP show significant performance drops on unseen data, and the model fails on the Speirs farm for pH (negative R2), highlighting the need for national-to-local calibration for farm-level applications. See [RESULTS.md](RESULTS.md) for full analysis including per-paddock breakdowns and ESP derivation experiments.
 
 ---
 
@@ -108,15 +108,51 @@ python scripts/train_resnet_ensemble.py \
     --output models/resnet_ensemble
 ```
 
-Or from Python:
+This training path now supports:
+- `group_kfold` CV by location/site
+- weighted Huber loss for sparse targets
+- per-target transforms (e.g. `log1p` for skewed chemistry)
+- ESP consistency regularization (`ESP ~= 100 * Na / CEC`)
+- optional specialist models for sparse targets (`CEC/ESP/SOC`)
+
+Or from Python (for custom workflows):
 
 ```python
+from pathlib import Path
+
 from src.training.train_resnet import train_ensemble
+from src.training.train_resnet import load_training_data
+
+targets = ["ph", "cec", "esp", "soc", "ca", "mg", "na"]
+X, y, valid_targets = load_training_data(
+    csv_path="data/processed/features.csv",
+    target_cols=targets,
+    feature_prefix="band_",
+    n_features=64,
+)
+
+config = {
+    "input_dim": 64,
+    "hidden_dim": 128,
+    "num_res_blocks": 2,
+    "dropout": 0.2,
+    "learning_rate": 1e-4,
+    "weight_decay": 1e-4,
+    "batch_size": 32,
+    "epochs": 300,
+    "patience": 30,
+    "grad_clip": 1.0,
+    "ensemble_size": 5,
+    "n_folds": 5,
+    "random_seed": 42,
+}
 
 train_ensemble(
-    data_path="data/processed/features.csv",
-    output_dir="models/resnet_ensemble",
-    n_models=5, n_splits=5, epochs=1000, lr=1e-4,
+    X=X,
+    y=y,
+    target_names=valid_targets,
+    config=config,
+    output_dir=Path("models/resnet_ensemble"),
 )
 ```
 
@@ -166,6 +202,56 @@ python scripts/predict_farm.py \
     --output results/farm_predictions
 ```
 
+### Bare Earth + SpectralGPT Fusion
+
+Download GA Barest Earth (Sentinel-2) via DEA WCS:
+
+```bash
+python scripts/download_bare_earth.py \
+    --bbox 148.9 -35.5 149.3 -35.1 \
+    --output data/external/ga_barest_earth_canberra.tif \
+    --discover
+```
+
+Build fused features (AlphaEarth + BareEarth bands + SpectralGPT embeddings + optional management):
+
+```bash
+python scripts/build_fused_features.py \
+    --soil-csv data/processed/features.csv \
+    --bare-earth-raster data/external/ga_barest_earth_canberra.tif \
+    --output-csv data/processed/features_fused.csv \
+    --spectral-method spectral_gpt \
+    --spectral-dim 16 \
+    --applications-csv data/farm/management_applications.csv
+```
+
+Train fused model:
+
+```bash
+python scripts/train_resnet_ensemble.py \
+    --data data/processed/features_fused.csv \
+    --config configs/resnet_fused.yaml \
+    --output models/resnet_fused
+```
+
+Quick ablation (does Bare Earth help?) using grouped RF CV:
+
+```bash
+python scripts/ablate_bare_earth_gain.py \
+    --alpha-csv data/processed/features.csv \
+    --fused-csv data/processed/features_fused.csv \
+    --alpha-prefix band_ \
+    --fused-prefix feat_ \
+    --group-mode latlon \
+    --output-csv results/metrics/bare_earth_ablation.csv
+```
+
+Management application CSV should include at least:
+- `date`
+- `rate_t_ha`
+- one of `type` or `material` (e.g. lime, gypsum)
+- plus either `site_id` or `lat`/`lon` for spatial matching
+
 ---
 
 ## Data Sources
@@ -205,7 +291,7 @@ soil-resnet-model/
 |   |   |-- predict_raster.py         GeoTIFF raster predictions
 |   |   |-- mosaic.py                 Farm mosaic creation
 |   |-- evaluation/
-|   |   |-- metrics.py                R², RMSE, MAE
+|   |   |-- metrics.py                R2, RMSE, MAE
 |   |   |-- cross_validation.py       K-fold, paddock-holdout CV
 |   |   |-- model_comparison.py       Side-by-side comparison
 |   |-- features/

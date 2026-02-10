@@ -1,0 +1,3 @@
+site_id,lat,lon,date,type,rate_t_ha,notes
+HILLPDK,-34.0000,148.0000,2021-03-15,lime,1.2,example row
+LIGHTNING,-34.1000,148.1000,2021-01-30,gypsum,1.8,example row

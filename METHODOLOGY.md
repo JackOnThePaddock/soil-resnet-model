@@ -79,6 +79,18 @@ To reduce interference from standing crop and pasture biomass (which reflects ve
 
 Each sample is represented by a single 64-dimensional vector (the AlphaEarth embedding composite). No hand-engineered spectral indices, terrain derivatives, or climate covariates are included -- the model learns all necessary representations from the embedding space.
 
+### Extended Feature Fusion (Experimental)
+
+An extended pipeline is implemented for feature fusion experiments:
+
+1. **GA Barest Earth (Sentinel-2)** bands are downloaded from DEA (`s2_barest_earth`) via WCS as GeoTIFF.
+2. Bare-earth spectra are sampled at soil points (`red, green, blue, red-edge, NIR, SWIR`).
+3. A lightweight **SpectralGPT-style embedding** (masked-band transformer) is trained on the sampled spectra to derive compact latent features.
+4. These spectral embeddings are concatenated with AlphaEarth embeddings.
+5. Optional management covariates are added to account for **post-imagery lime/gypsum applications**.
+
+The fused table is exported with canonical `feat_###` columns for model training.
+
 ---
 
 ## 3. Model Architecture
@@ -174,14 +186,15 @@ Within each ensemble member, five-fold cross-validation is used to estimate perf
 ### Optimiser and Learning Rate
 
 - **Optimiser**: AdamW with learning rate `1e-4` and weight decay `1e-4`. AdamW decouples weight decay from the gradient update, providing more consistent regularisation than L2 penalty in Adam.
-- **Learning rate scheduler**: `ReduceLROnPlateau` monitoring validation loss, with patience of 20 epochs and a reduction factor of 0.5. The learning rate is halved each time validation loss fails to improve for 20 consecutive epochs.
+- **Learning rate scheduler**: `ReduceLROnPlateau` monitoring validation loss, with default patience of 20 epochs and a reduction factor of 0.5. The learning rate is halved each time validation loss fails to improve for 20 consecutive epochs.
 
 ### Regularisation
 
 - **Early stopping**: Training terminates if validation loss does not improve for 30 consecutive epochs. The model checkpoint with the lowest validation loss is restored.
 - **Gradient clipping**: Gradients are clipped to a maximum norm of 1.0 to prevent exploding gradients.
 - **Dropout**: Applied within each residual block.
-- **Weight decay**: Applied via AdamW (1e-5).
+- **Weight decay**: Applied via AdamW (`1e-4`, as above).
+- **Robust loss**: Weighted masked Huber loss can be used to reduce sensitivity to heavy-tailed chemistry targets.
 
 ### Loss Function
 
@@ -193,29 +206,26 @@ L = (1 / N_valid) * sum_{i in valid} (y_i - y_hat_i)^2
 
 where `N_valid` is the number of non-missing target values in the batch, and the sum runs only over targets with valid measurements. This approach allows the model to learn from partial observations without imputing missing values.
 
+For sparse/imbalanced targets, an enhanced objective is available:
+
+- **Weighted masked Huber loss** with per-target and per-sample weights.
+- **ESP consistency penalty** enforcing agreement between direct ESP predictions and derived ESP (`100 * Na / CEC`).
+
 ### Feature Normalisation
 
 All 64 input features are normalised using `StandardScaler` (zero mean, unit variance), fitted on the full training set. The scaler parameters are saved as `scaler.pkl` alongside the model checkpoints.
 
 ### Target Normalisation
 
-Target values were z-score normalised (zero mean, unit variance) before training. The normalisation parameters per target are:
-
-| Target | Mean | Std |
-|--------|------|-----|
-| pH | 6.095 | 1.037 |
-| CEC | 14.249 | 15.106 |
-| ESP | 2.260 | 2.945 |
-| SOC | 3.401 | 3.854 |
-| Ca | 7.447 | 8.513 |
-| Mg | 3.460 | 4.508 |
-| Na | 0.290 | 0.584 |
-
-Model outputs are in normalised space and must be denormalised for interpretation: `raw = normalised * std + mean`. The target normalisation parameters are **not** stored in the model checkpoints and must be computed from the training data (`data/processed/features.csv`).
+Target values are currently trained in raw units (no z-score normalisation). Masked MSE is computed directly in original target scales.
 
 ### Training Budget
 
 Each model is trained for up to 300 epochs, though early stopping typically terminates training well before this limit.
+
+### Cross-Validation Strategy
+
+The training pipeline supports both random K-fold and **grouped K-fold**. Grouped K-fold is recommended for realistic generalisation estimates when repeated coordinates/site clusters are present. Group IDs can be derived from rounded `lat/lon` or `site_id`.
 
 ### Hyperparameter Summary
 
@@ -229,22 +239,28 @@ Each model is trained for up to 300 epochs, though early stopping typically term
 | Optimiser | AdamW |
 | Learning rate | 1e-4 |
 | Weight decay | 1e-4 |
+| Batch size | 32 |
 | LR scheduler | ReduceLROnPlateau |
 | LR scheduler patience | 20 epochs |
 | LR scheduler factor | 0.5 |
 | Early stopping patience | 30 epochs |
 | Gradient clipping max norm | 1.0 |
 | Maximum epochs | 300 |
+| Final full-data retraining epochs | 200 |
 | Ensemble size | 5 models |
 | Cross-validation folds | 5 |
 | Feature normalisation | StandardScaler |
 | Loss function | Masked MSE |
 
+### Specialist Heads (Optional)
+
+Sparse targets (for example `CEC`, `ESP`, `SOC`) can be further improved by training optional target-specific specialist models after ensemble training. At inference, specialist predictions are blended with the multi-target ensemble.
+
 ---
 
 ## 5. Baseline Models
 
-NationalSoilNet was compared against five conventional machine learning baselines, all trained on the same 64-dimensional AlphaEarth features:
+NationalSoilNet is compared against three conventional machine learning baselines in the maintained training pipeline, all trained on the same 64-dimensional AlphaEarth features:
 
 ### Support Vector Regression (SVR)
 
@@ -263,18 +279,9 @@ NationalSoilNet was compared against five conventional machine learning baseline
 - 500 estimators with the same tuning approach as Random Forest
 - Extra Trees use random split thresholds, providing additional variance reduction
 
-### Cubist
+Additional experiments (for example Cubist and GPR) are retained in `archive/` for reference, but are not part of the active baseline training entry point.
 
-- Rule-based regression model with committees and instance-based corrections
-- Particularly well-suited to soil science applications where interpretability is valued
-
-### Gaussian Process Regression (GPR)
-
-- Matern kernel (nu=2.5) with automatic relevance determination
-- Provides native uncertainty estimates
-- Computationally limited to moderate dataset sizes
-
-In per-target comparisons, NationalSoilNet consistently matched or exceeded the best baseline for each target, with the largest improvements on CEC (R-squared = 0.959 versus 0.91 for the best baseline) and Ca (R-squared = 0.929 versus 0.87).
+In per-target comparisons, NationalSoilNet consistently matched or exceeded the best baseline for each target, with the largest improvements on CEC (R2 = 0.959 versus 0.91 for the best baseline) and Ca (R2 = 0.929 versus 0.87).
 
 ---
 
@@ -307,6 +314,16 @@ CatBoost was selected for calibration because:
 3. Generate national model predictions and uncertainty for those locations.
 4. Train a CatBoost calibration model mapping national predictions to local observations.
 5. Apply the calibrated pipeline to all target locations (e.g., a raster grid across the farm).
+
+### Post-Imaging Management Adjustment
+
+When lime/gypsum application records are available, management covariates are added:
+
+- cumulative post-bare-earth application rate
+- exponentially decayed effective rate (half-life model)
+- days since last lime/gypsum application
+
+These covariates help account for chemistry shifts between bare-earth imaging date and soil sampling date.
 
 ---
 
@@ -356,7 +373,7 @@ Because data availability varies across targets (e.g., 3,511 samples for pH but 
 
 The final ensemble models were each trained on the full dataset (3,534 samples) after K-fold cross-validation. Metrics computed on this data are therefore **in-sample** and reflect an upper bound on performance:
 
-| Target | N | R² | RMSE | MAE |
+| Target | N | R2 | RMSE | MAE |
 |--------|---|-----|------|-----|
 | pH | 3,511 | 0.815 | 0.446 | 0.337 |
 | CEC | 694 | 0.952 | 3.321 | 2.425 |
@@ -372,7 +389,7 @@ To assess true generalisation, the ensemble was evaluated on two datasets with *
 
 **National Independent Dataset** (1,368 ANSIS samples with AlphaEarth features):
 
-| Target | N | R² | RMSE | MAE |
+| Target | N | R2 | RMSE | MAE |
 |--------|---|-----|------|-----|
 | pH | 1,367 | 0.606 | 0.577 | 0.448 |
 | CEC | 364 | 0.817 | 8.022 | 5.533 |
@@ -381,25 +398,25 @@ To assess true generalisation, the ensemble was evaluated on two datasets with *
 
 **Speirs Farm** (60 samples with laboratory analysis):
 
-| Target | N | R² | RMSE | MAE |
+| Target | N | R2 | RMSE | MAE |
 |--------|---|-----|------|-----|
 | pH | 60 | -0.914 | 0.550 | 0.455 |
 | CEC | 60 | 0.214 | 2.754 | 1.735 |
 | ESP | 60 | 0.464 | 2.110 | 1.801 |
 | Na | 60 | 0.536 | 0.244 | 0.193 |
 
-The substantial drop from training to independent metrics (e.g., pH: 0.815 to 0.606; ESP: 0.785 to 0.363) confirms significant overfitting. The negative pH R² on the Speirs farm indicates the model predicts worse than the mean for that site, which has predominantly acidic soils (pH 4.3--7.0) underrepresented in the national training distribution.
+The substantial drop from training to independent metrics (e.g., pH: 0.815 to 0.606; ESP: 0.785 to 0.363) confirms significant overfitting. The negative pH R2 on the Speirs farm indicates the model predicts worse than the mean for that site, which has predominantly acidic soils (pH 4.3--7.0) underrepresented in the national training distribution.
 
 ### ESP: Direct vs Derived Prediction
 
-Since ESP = (Na / CEC) × 100, computing ESP from the model's Na and CEC predictions was compared against the direct ESP prediction head. On the Speirs farm, the derived approach outperforms (R² = 0.552 vs 0.464), while on national data the direct head is slightly better (R² = 0.363 vs 0.277). Neither is reliable enough for precision applications without local calibration.
+Since ESP = (Na / CEC) x 100, computing ESP from the model's Na and CEC predictions was compared against the direct ESP prediction head. On the Speirs farm, the derived approach outperforms (R2 = 0.552 vs 0.464), while on national data the direct head is slightly better (R2 = 0.363 vs 0.277). Neither is reliable enough for precision applications without local calibration.
 
 ### Implications
 
 These findings demonstrate that:
 
-1. **National-to-local calibration is not optional** — it is essential for farm-level predictions.
-2. **CEC generalises best** (R² = 0.817 on independent data), making it the most trustworthy target for uncalibrated national predictions.
+1. **National-to-local calibration is not optional** - it is essential for farm-level predictions.
+2. **CEC generalises best** (R2 = 0.817 on independent data), making it the most trustworthy target for uncalibrated national predictions.
 3. **A proper train/test split** (with the test set truly excluded from the final model training) is needed for honest reporting of generalisation performance.
 
 ---

@@ -12,7 +12,7 @@ def compute_metrics(
     target_names: Optional[List[str]] = None,
 ) -> Dict[str, Dict[str, float]]:
     """
-    Compute R², RMSE, and MAE for each target property.
+    Compute R2, RMSE, and MAE for each target property.
 
     Args:
         y_true: Ground truth array of shape (n_samples, n_targets)
@@ -35,8 +35,8 @@ def compute_metrics(
         true = y_true[:, i]
         pred = y_pred[:, i]
 
-        # Skip columns that are all NaN
-        mask = ~np.isnan(true)
+        # Skip columns with insufficient finite values.
+        mask = np.isfinite(true) & np.isfinite(pred)
         if mask.sum() < 2:
             continue
 
@@ -58,7 +58,7 @@ def format_metrics_table(
 ) -> str:
     """Format metrics dict as a printable table."""
     lines = [title, "=" * len(title)]
-    lines.append(f"{'Target':<10} {'R²':>8} {'RMSE':>10} {'MAE':>10}")
+    lines.append(f"{'Target':<10} {'R2':>8} {'RMSE':>10} {'MAE':>10}")
     lines.append("-" * 42)
 
     for target, m in metrics.items():

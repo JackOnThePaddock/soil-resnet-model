@@ -1,6 +1,7 @@
 """Unified baseline model training (SVR, Random Forest, Extra Trees)."""
 
 from pathlib import Path
+import re
 from typing import List, Tuple
 
 import numpy as np
@@ -12,6 +13,37 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVR
 
 from src.evaluation.metrics import compute_metrics
+
+
+def _feature_sort_key(column_name: str) -> Tuple[int, int, str]:
+    """Sort feature columns by trailing numeric suffix when available."""
+    match = re.search(r"(\d+)$", column_name)
+    if match:
+        return (0, int(match.group(1)), column_name)
+    return (1, -1, column_name)
+
+
+def _resolve_feature_columns(df: pd.DataFrame, feature_prefix: str = "auto") -> List[str]:
+    """Resolve feature columns from explicit prefix or robust fallback patterns."""
+    columns = df.columns.tolist()
+    prefix = feature_prefix.lower().strip()
+
+    if prefix and prefix != "auto":
+        pattern = re.compile(rf"^{re.escape(prefix)}\d+$")
+        matched = [c for c in columns if pattern.match(c)]
+        if matched:
+            return sorted(matched, key=_feature_sort_key)
+        matched = [c for c in columns if c.startswith(prefix)]
+        if matched:
+            return sorted(matched, key=_feature_sort_key)
+
+    for fallback_pattern in (r"^band_\d+$", r"^ae_\d+$", r"^a\d+$"):
+        pattern = re.compile(fallback_pattern)
+        matched = [c for c in columns if pattern.match(c)]
+        if matched:
+            return sorted(matched, key=_feature_sort_key)
+
+    return []
 
 
 def train_svr(X: np.ndarray, y: np.ndarray, cv: KFold) -> Tuple[object, np.ndarray, dict]:
@@ -62,11 +94,19 @@ def train_all_baselines(
     csv_path: str,
     targets: List[str],
     output_dir: str,
+    feature_prefix: str = "auto",
+    n_features: int = 64,
 ) -> pd.DataFrame:
     """Train all baseline models on each target, save comparison metrics."""
     df = pd.read_csv(csv_path)
     df.columns = df.columns.str.lower()
-    band_cols = sorted([c for c in df.columns if c.startswith("a")])
+    band_cols = _resolve_feature_columns(df, feature_prefix=feature_prefix)
+    if not band_cols:
+        raise ValueError(
+            f"No feature columns found. Tried prefix '{feature_prefix}' with band_/ae_/aNN fallbacks."
+        )
+    if len(band_cols) != int(n_features):
+        raise ValueError(f"Expected {n_features} feature columns, found {len(band_cols)}")
 
     results = []
     cv = KFold(n_splits=5, shuffle=True, random_state=42)

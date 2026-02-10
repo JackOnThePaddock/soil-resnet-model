@@ -32,7 +32,7 @@ def generate_comparison_table(
 def format_results_markdown(metrics_csv: str) -> str:
     """Format a metrics CSV into a markdown table."""
     df = pd.read_csv(metrics_csv)
-    lines = ["| Model | Target | R² | RMSE | MAE | N |", "|-------|--------|-----|------|-----|---|"]
+    lines = ["| Model | Target | R2 | RMSE | MAE | N |", "|-------|--------|-----|------|-----|---|"]
     for _, row in df.iterrows():
         model = row.get("model", "")
         target = row.get("target", "")

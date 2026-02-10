@@ -20,11 +20,18 @@ def main():
 
     args = parser.parse_args()
 
-    with open(args.config) as f:
+    with open(args.config, encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
 
     targets = cfg.get("targets", ["pH", "CEC", "ESP", "SOC", "Ca", "Mg", "Na"])
-    train_all_baselines(args.data, targets, args.output)
+    data_cfg = cfg.get("data", {})
+    train_all_baselines(
+        args.data,
+        targets,
+        args.output,
+        feature_prefix=data_cfg.get("feature_prefix", "auto"),
+        n_features=data_cfg.get("n_features", 64),
+    )
 
 
 if __name__ == "__main__":

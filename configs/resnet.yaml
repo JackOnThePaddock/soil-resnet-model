@@ -4,7 +4,7 @@ model:
   input_dim: 64          # AlphaEarth satellite embedding bands
   hidden_dim: 128        # Hidden layer dimension
   num_blocks: 2          # Number of residual blocks
-  dropout: 0.3           # Dropout rate
+  dropout: 0.2           # Dropout rate
   activation: silu       # Activation function (SiLU/Swish)
 
 targets:
@@ -19,20 +19,45 @@ targets:
 training:
   ensemble_size: 5       # Number of models in ensemble
   n_splits: 5            # K-fold cross-validation splits
-  epochs: 1000           # Maximum training epochs
-  batch_size: 64         # Training batch size
+  epochs: 300            # Maximum training epochs
+  batch_size: 32         # Training batch size
   learning_rate: 0.0001  # AdamW learning rate
-  weight_decay: 0.01     # AdamW weight decay
-  patience: 50           # Early stopping patience
+  weight_decay: 0.0001   # AdamW weight decay
+  patience: 30           # Early stopping patience
+  lr_patience: 20        # ReduceLROnPlateau patience
+  lr_factor: 0.5         # ReduceLROnPlateau factor
   grad_clip: 1.0         # Gradient clipping max norm
-  val_fraction: 0.2      # Validation split fraction
+  cv_strategy: "group_kfold"  # "kfold" or "group_kfold"
+  final_epochs: 200      # Final full-data retraining epochs
+  loss_name: "weighted_huber" # "weighted_huber" or "masked_mse"
+  huber_delta: 1.0       # Huber transition point
+  esp_consistency_weight: 0.05 # Penalize mismatch between ESP and 100*Na/CEC
+  target_weight_mode: "inverse_frequency" # Sparse-target upweighting
+  sample_weight_mode: "rare_target_average" # Per-row weighting mode
+  auto_target_transforms: true
+  target_transforms:
+    ph: identity
+    cec: log1p
+    esp: log1p
+    soc: log1p
+    ca: log1p
+    mg: log1p
+    na: log1p
+  specialist_targets: ["cec", "esp", "soc"]
+  specialist_epochs: 120
+  specialist_patience: 20
+  specialist_val_fraction: 0.2
+  specialist_blend_weight: 0.4
   random_seed: 42        # Base random seed
 
 data:
   depth_filter: "0-15cm" # Soil depth range
   min_year: 2017         # Minimum observation year
-  feature_prefix: "AE_"  # AlphaEarth band column prefix
+  feature_prefix: "band_" # AlphaEarth band column prefix
   n_features: 64         # Number of input features
+  group_by: "latlon"     # Grouped CV key: latlon | site_id
+  group_round: 4         # Decimal rounding for lat/lon groups
+  reference_data: null   # Optional reference-domain CSV for covariate-shift weighting
 
 output:
   model_dir: "models/resnet_ensemble"

@@ -26,7 +26,7 @@ def main():
         df = pd.read_csv(ensemble_csv)
         lines.append("### Holdout Metrics (Ensemble Mean)")
         lines.append("")
-        lines.append("| Target | N Test | R² | RMSE (raw) | MAE (raw) |")
+        lines.append("| Target | N Test | R2 | RMSE (raw) | MAE (raw) |")
         lines.append("|--------|--------|-----|------------|-----------|")
         for _, row in df.iterrows():
             lines.append(
@@ -41,7 +41,7 @@ def main():
         df = pd.read_csv(per_model_csv)
         lines.append("### Per-Model Variance")
         lines.append("")
-        lines.append("| Model | Target | R² | RMSE |")
+        lines.append("| Model | Target | R2 | RMSE |")
         lines.append("|-------|--------|-----|------|")
         for _, row in df.iterrows():
             lines.append(f"| {row['model']} | {row['target']} | {row['r2_norm']:.3f} | {row['rmse_norm']:.3f} |")
@@ -53,7 +53,7 @@ def main():
         df = pd.read_csv(baseline_csv)
         lines.append("## Baseline Model Comparison")
         lines.append("")
-        lines.append("| Model | Target | R² | RMSE | MAE |")
+        lines.append("| Model | Target | R2 | RMSE | MAE |")
         lines.append("|-------|--------|-----|------|-----|")
         for _, row in df.iterrows():
             r2 = f"{row['r2']:.3f}" if pd.notna(row.get("r2")) else "N/A"
