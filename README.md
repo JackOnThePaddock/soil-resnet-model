@@ -182,19 +182,19 @@ python scripts/predict_farm.py \
 soil-resnet-model/
 |-- README.md                         Project overview and quick start
 |-- METHODOLOGY.md                    Detailed methodology documentation
-|-- RESULTS.md                        Model performance metrics
+|-- RESULTS.md                        Model performance metrics and findings
 |-- pyproject.toml                    Package configuration and dependencies
 |-- Makefile                          Common commands
 |-- configs/
 |   |-- resnet.yaml                   ResNet hyperparameters
 |   |-- baselines.yaml                Baseline model configs
 |
-|-- src/
+|-- src/                              Refactored source code
 |   |-- models/
 |   |   |-- resnet.py                 NationalSoilNet + ResidualBlock
 |   |   |-- dataset.py                SoilDataset (PyTorch Dataset)
 |   |   |-- ensemble.py               SoilEnsemble loader + predict
-|   |   |-- baselines/                (placeholder; training in src/training/)
+|   |   |-- baselines/                SVR, RF, Cubist, GPR
 |   |-- training/
 |   |   |-- train_resnet.py           Ensemble training loop
 |   |   |-- train_baselines.py        Baseline training
@@ -225,13 +225,18 @@ soil-resnet-model/
 |       |-- clhs_sampling.py          cLHS sampling design
 |
 |-- scripts/                          CLI entry points
-|-- data/raw/                         Raw soil data + SQLite DB
-|-- models/resnet_ensemble/           Trained weights + scaler
-|-- results/metrics/                  Holdout evaluation CSVs
-|-- notebooks/                        EDA and analysis notebooks
+|-- data/
+|   |-- raw/                          Raw soil data + SQLite DB
+|   |-- processed/                    Training datasets (features.csv, features_normalized.csv)
+|   |-- farm/                         Speirs farm training data (69 samples, 1x1 and 3x3)
+|   |-- validation/                   Independent validation data (1,368 national samples)
+|-- models/resnet_ensemble/           Trained weights (5 models) + scaler
+|-- results/metrics/                  40+ evaluation CSVs (all models, all experiments)
+|-- notebooks/                        Colab training notebook (with outputs), sodic classifier
+|-- docs/                             Honours report, project report
+|-- gee/                              GEE setup, sampling scripts, Colab training code
 |-- tests/                            Unit tests
-|-- gee/                              GEE setup and sampling
-|-- archive/                          Original scripts for reference
+|-- archive/                          ~116 original scripts organized by category
 ```
 
 ---

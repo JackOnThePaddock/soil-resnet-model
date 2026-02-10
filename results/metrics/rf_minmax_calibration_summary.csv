@@ -1,0 +1,17 @@
+paddock,variable,obs_min,obs_max,pred_min,pred_max,output
+300,CEC,6.7,18.3,6.729249954223633,11.835332870483398,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\300_CEC_5yr_rfe_best.tif
+300,PH,4.5,6.7,4.427641868591309,5.354008197784424,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\300_pH_5yr_rfe_best.tif
+400,CEC,6.9,19.3,5.542916774749756,11.923166275024414,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\400_CEC_5yr_rfe_best.tif
+400,PH,4.7,6.3,4.409566879272461,5.406979084014893,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\400_pH_5yr_rfe_best.tif
+HILLPDK,CEC,3.6,22.0,5.24066686630249,13.208582878112793,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\HILLPDK_CEC_5yr_rfe_best.tif
+HILLPDK,PH,4.31,7.0,4.416508197784424,5.407925128936768,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\HILLPDK_pH_5yr_rfe_best.tif
+Lease_1,CEC,6.1,8.2,6.062458515167236,10.00100040435791,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\Lease_1_CEC_5yr_rfe_best.tif
+Lease_1,PH,4.9,5.1,4.453662395477295,5.209191799163818,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\Lease_1_pH_5yr_rfe_best.tif
+Lease_2,CEC,9.1,9.7,6.093999862670898,10.487250328063965,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\Lease_2_CEC_5yr_rfe_best.tif
+Lease_2,PH,5.4,5.6,4.459237575531006,5.400450229644775,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\Lease_2_pH_5yr_rfe_best.tif
+Lease_3,CEC,5.8,8.2,6.150583267211914,10.782166481018066,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\Lease_3_CEC_5yr_rfe_best.tif
+Lease_3,PH,5.0,5.2,4.486295700073242,5.383220672607422,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\Lease_3_pH_5yr_rfe_best.tif
+LIGHTNING_TREE,CEC,5.5,17.0,6.263083457946777,13.503833770751953,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\LIGHTNING_TREE_CEC_5yr_rfe_best.tif
+LIGHTNING_TREE,PH,4.3,5.71,4.388537406921387,5.383220672607422,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\LIGHTNING_TREE_pH_5yr_rfe_best.tif
+MERRIMU_DRIVEWAY,CEC,6.0,12.9,6.213375091552734,11.805583000183105,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\MERRIMU_DRIVEWAY_CEC_5yr_rfe_best.tif
+MERRIMU_DRIVEWAY,PH,4.8,5.3,4.4170331954956055,5.379595756530762,C:\Users\jackc\Documents\EW WH & MG SPEIRS\SOIL Tests\exports\rf_minmax_calibration\rfe_best_minmax_calibrated\MERRIMU_DRIVEWAY_pH_5yr_rfe_best.tif

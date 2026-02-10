@@ -1,0 +1,3 @@
+target,n_national,n_local,base_model,base_params,holdout_rmse_base,holdout_mae_base,holdout_r2_base,holdout_rmse_cal,holdout_mae_cal,holdout_r2_cal
+na_cmolkg,1523,60,CatBoost,"{'depth': 8, 'learning_rate': 0.05, 'l2_leaf_reg': 5}",0.9841104830674724,0.7986878325822966,-7.013283566675767,0.24375176217395048,0.19478182867815397,0.508392699795756
+esp_pct,663,60,CatBoost,"{'depth': 8, 'learning_rate': 0.05, 'l2_leaf_reg': 5}",3.498426761749325,2.8014382662732378,-0.45205210807903184,2.122301055736512,1.854684226554431,0.4656194916464734

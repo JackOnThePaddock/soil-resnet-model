@@ -29,12 +29,16 @@ desktop.ini
 # Jupyter
 .ipynb_checkpoints/
 
-# Data (large files tracked separately)
+# Data (large binary files)
 data/processed/*.parquet
 data/processed/*.db
 !data/processed/README.md
 !data/processed/features.csv
 !data/processed/features_normalized.csv
+
+# GeoTIFF outputs (generated, not tracked)
+*.tif
+*.tiff
 
 # Environment
 .env

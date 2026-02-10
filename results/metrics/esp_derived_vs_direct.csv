@@ -1,0 +1,3 @@
+method,n_samples,rmse_loocv,mae_loocv,r2_loocv,notes
+ESP_derived_from_Na_over_CEC,69,2.3642460641825265,1.8349231056532116,0.29175318305469533,ESP = 100 * Na_cmol / CEC using LOOCV preds
+ESP_direct_SVR,69,1.9190136373740978,1.5746381246932797,0.5333885366730421,"Best SVR+RFE model, LOOCV preds"
